@@ -810,7 +810,7 @@ function renderInstances(instances, selected) {
     }
     btns += `<button class="btn-neutral" data-action="pull-${name}" onclick="doAction('pull','${name}',this)">⬇ Pull</button>`;
     if (isSel) {
-      btns += `<button class="btn-warn" onclick="openModal()">🧹 Clear</button>`;
+      btns += `<button class="btn-warn" title="Clear Data (docker compose down --volumes)" onclick="openModal()">🧹 Clear</button>`;
     }
     btns += `<button class="btn-danger" onclick="showDeleteModal('${name}')">🗑</button>`;
 
