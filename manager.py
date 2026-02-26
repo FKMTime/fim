@@ -800,6 +800,7 @@ function setBtnLoading(btn, loading) {
 
 function startProgressPolling() {
   _busy = true;
+  if (_pollTimer) clearInterval(_pollTimer);
   document.getElementById('action-log').style.display = 'none';
   document.getElementById('switch-progress').style.display = 'block';
   document.getElementById('progress-stages').innerHTML = '';
@@ -1169,9 +1170,10 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/action":
             action = body.get("action")
             target = body.get("instance")
-            if _action_lock.locked():
+            if not _action_lock.acquire(blocking=False):
                 self.send_json({"ok": False, "error": "Action already running"})
                 return
+            _action_lock.release()
             threading.Thread(target=_do_action_async, args=(action, target), daemon=True).start()
             self.send_json({"ok": True})
         elif path == "/api/env/save":
@@ -1191,9 +1193,10 @@ class Handler(BaseHTTPRequestHandler):
             if not name or name not in get_instances():
                 self.send_json({"ok": False, "error": "Instance not found"})
                 return
-            if _action_lock.locked():
+            if not _action_lock.acquire(blocking=False):
                 self.send_json({"ok": False, "error": "Action already running"})
                 return
+            _action_lock.release()
             threading.Thread(target=_do_delete_async, args=(name,), daemon=True).start()
             self.send_json({"ok": True})
         elif path == "/api/wifi":
