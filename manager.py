@@ -151,6 +151,31 @@ def run_cmd(args, cwd=None, timeout=180):
     except Exception as e:
         return -1, str(e) + "\n"
 
+def run_cmd_live(args, cwd=None, timeout=180, stage_idx=0):
+    """Run a command and stream its output line-by-line into the progress log."""
+    try:
+        proc = subprocess.Popen(
+            args, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, bufsize=1
+        )
+        output = ""
+        deadline = time.time() + timeout
+        for line in proc.stdout:
+            output += line
+            progress_stage(stage_idx, "running", line.rstrip("\n"))
+            if time.time() > deadline:
+                proc.kill()
+                output += "Command timed out\n"
+                progress_stage(stage_idx, "running", "Command timed out")
+                return -1, output
+        proc.wait(timeout=max(0, deadline - time.time()))
+        return proc.returncode, output
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        return -1, output + "Command timed out\n"
+    except Exception as e:
+        return -1, str(e) + "\n"
+
 def compose_status(name):
     insts = get_instances()
     if name not in insts:
@@ -268,8 +293,8 @@ def _do_switch_to(target):
         if selected == target or selected is None:
             progress_reset([f"Start {target}"])
             progress_stage(0, "running")
-            code, out = run_cmd(["docker", "compose", "up", "-d"], cwd=insts[target])
-            progress_stage(0, "done" if code == 0 else "error", out)
+            code, out = run_cmd_live(["docker", "compose", "up", "-d"], cwd=insts[target], stage_idx=0)
+            progress_stage(0, "done" if code == 0 else "error")
             if code == 0:
                 set_selected(target)
             progress_done(ok=code == 0)
@@ -277,20 +302,20 @@ def _do_switch_to(target):
         # full switch
         progress_reset([f"Stop {selected}", f"Start {target}", "Update selection"])
         progress_stage(0, "running")
-        code, out = run_cmd(["docker", "compose", "down"], cwd=insts[selected])
-        progress_stage(0, "done" if code == 0 else "error", out)
+        code, out = run_cmd_live(["docker", "compose", "down"], cwd=insts[selected], stage_idx=0)
+        progress_stage(0, "done" if code == 0 else "error")
         if code != 0:
             progress_done(ok=False)
             return
         progress_stage(1, "running")
-        code, out = run_cmd(["docker", "compose", "up", "-d"], cwd=insts[target])
-        progress_stage(1, "done" if code == 0 else "error", out)
+        code, out = run_cmd_live(["docker", "compose", "up", "-d"], cwd=insts[target], stage_idx=1)
+        progress_stage(1, "done" if code == 0 else "error")
         if code != 0:
             progress_done(ok=False)
             return
         progress_stage(2, "running")
         set_selected(target)
-        progress_stage(2, "done", f"Selected: {target}\n")
+        progress_stage(2, "done", f"Selected: {target}")
         progress_done(ok=True)
 
 # ── Async action worker ─────────────────────────────────────────────────────
@@ -301,7 +326,7 @@ def _do_action_async(action, target):
         use_name = target if (target and target in insts) else get_selected()
         if not use_name or use_name not in insts:
             progress_reset([action])
-            progress_stage(0, "error", "No valid instance selected\n")
+            progress_stage(0, "error", "No valid instance selected")
             progress_done(ok=False)
             return
         cwd = insts[use_name]
@@ -321,13 +346,13 @@ def _do_action_async(action, target):
         cmd = cmd_map.get(action)
         if not cmd:
             progress_reset([label])
-            progress_stage(0, "error", "Unknown action\n")
+            progress_stage(0, "error", "Unknown action")
             progress_done(ok=False)
             return
         progress_reset([label])
         progress_stage(0, "running")
-        code, out = run_cmd(cmd, cwd=cwd)
-        progress_stage(0, "done" if code == 0 else "error", out)
+        code, out = run_cmd_live(cmd, cwd=cwd, stage_idx=0)
+        progress_stage(0, "done" if code == 0 else "error")
         progress_done(ok=code == 0)
 
 def _do_delete_async(name):
@@ -335,14 +360,14 @@ def _do_delete_async(name):
         insts = get_instances()
         if name not in insts:
             progress_reset([f"Delete {name}"])
-            progress_stage(0, "error", "Instance not found\n")
+            progress_stage(0, "error", "Instance not found")
             progress_done(ok=False)
             return
         path = insts[name]
         progress_reset([f"Stop containers for {name}", f"Remove {name}"])
         progress_stage(0, "running")
-        code, out = run_cmd(["docker", "compose", "down", "--volumes"], cwd=path, timeout=90)
-        progress_stage(0, "done" if code == 0 else "error", out)
+        code, out = run_cmd_live(["docker", "compose", "down", "--volumes"], cwd=path, timeout=90, stage_idx=0)
+        progress_stage(0, "done" if code == 0 else "error")
         progress_stage(1, "running")
         try:
             shutil.rmtree(path)
@@ -356,10 +381,10 @@ def _do_delete_async(name):
                         os.unlink(LOCK_FILE)
                     except Exception:
                         pass
-            progress_stage(1, "done", f"Instance {name} removed\n")
+            progress_stage(1, "done", f"Instance {name} removed")
             progress_done(ok=True)
         except Exception as e:
-            progress_stage(1, "error", str(e) + "\n")
+            progress_stage(1, "error", str(e))
             progress_done(ok=False)
 
 def _do_wifi_async(hs_ssid, hs_psk, sta_ssid, sta_psk):
@@ -378,7 +403,7 @@ def _do_wifi_async(hs_ssid, hs_psk, sta_ssid, sta_psk):
             cmds_set.append(["uci","set",f"wireless.default_radio0.key={sta_psk}"])
         if not cmds_set:
             progress_reset(["Apply WiFi"])
-            progress_stage(0, "error", "Nothing to set.\n")
+            progress_stage(0, "error", "Nothing to set.")
             progress_done(ok=False)
             return
 
@@ -417,21 +442,33 @@ def _do_wifi_async(hs_ssid, hs_psk, sta_ssid, sta_psk):
             progress_done(ok=False)
             return
         progress_stage(1, "running", "$ wifi reload")
-        _, out = run_cmd(["wifi","reload"], timeout=15)
-        if out.strip():
-            progress_stage(1, "running", out.strip())
+        code, out = run_cmd_live(["wifi","reload"], timeout=15, stage_idx=1)
         progress_stage(1, "done")
 
         # Stage 2 (optional): restart compose
         if len(stages) > 2 and selected:
             progress_stage(2, "running")
-            progress_stage(2, "running", f"$ docker compose restart ({selected})")
-            _, out = run_cmd(["docker","compose","restart"], cwd=get_instances()[selected])
-            if out.strip():
-                progress_stage(2, "running", out.strip())
-            progress_stage(2, "done")
+            progress_stage(2, "running", f"$ docker compose up -d ({selected})")
+            code, out = run_cmd_live(["docker","compose","up","-d"], cwd=get_instances()[selected], stage_idx=2)
+            progress_stage(2, "done" if code == 0 else "error")
 
         progress_done(ok=True)
+
+def _do_env_restart_async(name):
+    """Restart compose after .env change using 'docker compose up -d' to pick up new env."""
+    with _action_lock:
+        insts = get_instances()
+        if name not in insts:
+            progress_reset([f"Restart {name}"])
+            progress_stage(0, "error", "Instance not found")
+            progress_done(ok=False)
+            return
+        progress_reset([f"Apply .env changes to {name}"])
+        progress_stage(0, "running")
+        progress_stage(0, "running", f"$ docker compose up -d ({name})")
+        code, out = run_cmd_live(["docker", "compose", "up", "-d"], cwd=insts[name], stage_idx=0)
+        progress_stage(0, "done" if code == 0 else "error")
+        progress_done(ok=code == 0)
 
 # ── Dynamic port 80 manager ─────────────────────────────────────────────────
 
@@ -611,7 +648,7 @@ MAIN_HTML = r"""<!DOCTYPE html>
   .redirect-banner{display:none;position:fixed;top:0;left:0;right:0;z-index:200;
     background:#2a5caa;color:#fff;text-align:center;padding:12px;font-size:.9rem;font-weight:600}
   .toast-container{position:fixed;top:16px;right:16px;z-index:300;display:flex;flex-direction:column;gap:8px;pointer-events:none}
-  .toast{pointer-events:auto;padding:10px 18px;border-radius:8px;font-size:.85rem;font-weight:600;color:#fff;box-shadow:0 4px 20px #0006;animation:toastIn .3s ease,toastOut .3s ease forwards;animation-delay:0s,3s;opacity:0}
+  .toast{pointer-events:auto;padding:10px 18px;border-radius:8px;font-size:.85rem;font-weight:600;color:#fff;box-shadow:0 4px 20px #0006;animation:toastIn .3s ease forwards,toastOut .3s ease forwards;animation-delay:0s,3s;opacity:0}
   .toast-success{background:#1a5a2a}
   .toast-error{background:#7a2020}
   .toast-info{background:#1a3a6a}
@@ -1014,7 +1051,12 @@ async function saveEnv() {
   const msg     = document.getElementById('env-save-msg');
   msg.textContent = data.ok ? '✓ Saved' : ('✗ '+data.error);
   msg.style.color = data.ok ? '#60ff90' : '#ff6060';
-  showToast(data.ok ? 'Environment saved' : 'Failed to save .env', data.ok ? 'success' : 'error');
+  if (data.ok && data.restarting) {
+    showToast('Saved — restarting compose to apply changes…', 'info');
+    startProgressPolling();
+  } else {
+    showToast(data.ok ? 'Environment saved' : 'Failed to save .env', data.ok ? 'success' : 'error');
+  }
 }
 
 // WiFi
@@ -1285,7 +1327,15 @@ class Handler(BaseHTTPRequestHandler):
             selected = get_selected()
             try:
                 write_env(selected, body.get("content", ""))
-                self.send_json({"ok": True})
+                # Check if instance is running and trigger restart
+                restarting = False
+                if selected:
+                    running, _ = compose_status(selected)
+                    if running and _action_lock.acquire(blocking=False):
+                        _action_lock.release()
+                        threading.Thread(target=_do_env_restart_async, args=(selected,), daemon=True).start()
+                        restarting = True
+                self.send_json({"ok": True, "restarting": restarting})
             except Exception as e:
                 self.send_json({"ok": False, "error": str(e)})
         elif path == "/api/instance/create":
