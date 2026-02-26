@@ -390,7 +390,7 @@ MAIN_HTML = r"""<!DOCTYPE html>
   body{font-family:'Segoe UI',sans-serif;background:#0f1117;color:#e0e0e0;min-height:100vh}
   header{background:#1a1d27;border-bottom:1px solid #2a2d3a;padding:14px 24px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
   header h1{font-size:1.2rem;font-weight:600;letter-spacing:.5px;color:#fff}
-  .badge{padding:4px 12px;border-radius:20px;font-size:.75rem;font-weight:700;letter-spacing:.5px}
+  .badge{padding:4px 12px;border-radius:20px;font-size:.75rem;font-weight:700;letter-spacing:.5px;transition:all .3s ease}
   .badge-fkmtest{background:#1a3a5c;color:#60aaff}
   .badge-prod{background:#3a1a1a;color:#ff6060}
   .badge-ok{background:#1a3a1a;color:#60ff90}
@@ -400,7 +400,8 @@ MAIN_HTML = r"""<!DOCTYPE html>
   .tab{padding:10px 20px;cursor:pointer;border-radius:8px 8px 0 0;font-size:.9rem;background:#1a1d27;color:#888;border:1px solid #2a2d3a;border-bottom:none;transition:all .2s}
   .tab.active{background:#22253a;color:#fff;border-color:#3a3d5a}
   .tab:hover:not(.active){color:#ccc}
-  .panel{display:none}.panel.active{display:block}
+  .panel{display:none;animation:fadeIn .25s ease}.panel.active{display:block}
+  @keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
   .card{background:#1a1d27;border:1px solid #2a2d3a;border-radius:10px;padding:20px;margin-bottom:16px}
   .card h2{font-size:1rem;font-weight:600;margin-bottom:14px;color:#aab}
   .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
@@ -411,8 +412,10 @@ MAIN_HTML = r"""<!DOCTYPE html>
   .btn-warn{background:#8a6a00;color:#fff}.btn-warn:hover{background:#aa8000}
   .btn-neutral{background:#2a2d3a;color:#ccc}.btn-neutral:hover{background:#3a3d4a}
   button:disabled{opacity:.4;cursor:not-allowed}
+  button .spinner{display:inline-block;width:12px;height:12px;border:2px solid transparent;border-top-color:currentColor;border-radius:50%;animation:spin .6s linear infinite;margin-right:6px;vertical-align:middle}
+  @keyframes spin{to{transform:rotate(360deg)}}
   textarea{width:100%;background:#0f1117;color:#d0e0d0;border:1px solid #2a2d3a;border-radius:6px;padding:10px;font-family:'Courier New',monospace;font-size:.82rem;resize:vertical;line-height:1.5}
-  .status-box{background:#0f1117;border:1px solid #2a2d3a;border-radius:6px;padding:12px;font-family:'Courier New',monospace;font-size:.8rem;white-space:pre-wrap;max-height:180px;overflow-y:auto;color:#90c090}
+  .status-box{background:#0f1117;border:1px solid #2a2d3a;border-radius:6px;padding:12px;font-family:'Courier New',monospace;font-size:.8rem;white-space:pre-wrap;max-height:180px;overflow-y:auto;color:#90c090;transition:color .3s ease}
   .status-box.err{color:#c09090}
   input[type=text],input[type=password],select{background:#0f1117;color:#e0e0e0;border:1px solid #2a2d3a;border-radius:6px;padding:8px 10px;font-size:.85rem;width:100%}
   label{font-size:.85rem;color:#888;margin-bottom:4px;display:block}
@@ -420,7 +423,8 @@ MAIN_HTML = r"""<!DOCTYPE html>
   .split{display:grid;grid-template-columns:1fr 1fr;gap:16px}
   @media(max-width:600px){.split{grid-template-columns:1fr}}
   .log-box{background:#0f1117;border:1px solid #2a2d3a;border-radius:6px;padding:10px;font-family:'Courier New',monospace;font-size:.78rem;white-space:pre-wrap;max-height:260px;overflow-y:auto;color:#b0c0a0;margin-top:12px;display:none}
-  .instance-card{border-left:4px solid #333;padding-left:12px;margin-bottom:10px}
+  .instance-card{border-left:4px solid #333;padding-left:12px;margin-bottom:10px;transition:border-color .3s ease,opacity .3s ease;animation:cardIn .3s ease both}
+  @keyframes cardIn{from{opacity:0;transform:translateX(-6px)}to{opacity:1;transform:translateX(0)}}
   .instance-card.selected{border-left-color:#60aaff}
   .instance-card.selected.prod{border-left-color:#ff6060}
   .section-title{font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#555;margin-bottom:10px}
@@ -440,9 +444,10 @@ MAIN_HTML = r"""<!DOCTYPE html>
   .progress-fill{height:100%;background:linear-gradient(90deg,#2a5caa,#60aaff);border-radius:3px;transition:width .5s ease;width:0%}
   @keyframes pulse{0%,100%{box-shadow:0 0 0 0 #2a5caa88}50%{box-shadow:0 0 0 6px #2a5caa00}}
   .instances-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}
-  .modal-overlay{display:none;position:fixed;inset:0;background:#000b;z-index:100;align-items:center;justify-content:center}
-  .modal-overlay.show{display:flex}
-  .modal{background:#1a1d27;border:1px solid #3a2020;border-radius:12px;padding:28px;max-width:420px;width:90%;box-shadow:0 8px 40px #0009}
+  .modal-overlay{display:none;position:fixed;inset:0;background:#000b;z-index:100;align-items:center;justify-content:center;opacity:0;transition:opacity .2s ease}
+  .modal-overlay.show{display:flex;opacity:1}
+  .modal{background:#1a1d27;border:1px solid #3a2020;border-radius:12px;padding:28px;max-width:420px;width:90%;box-shadow:0 8px 40px #0009;transform:scale(.95);transition:transform .2s ease}
+  .modal-overlay.show .modal{transform:scale(1)}
   .modal h3{font-size:1rem;color:#ff9090;margin-bottom:10px}
   .modal p{font-size:.85rem;color:#aaa;margin-bottom:18px;line-height:1.6}
   .modal .row{margin-bottom:0}
@@ -450,12 +455,20 @@ MAIN_HTML = r"""<!DOCTYPE html>
   .modal-input-wrap input,.modal-input-wrap select{border-color:#3a2020;width:100%;background:#0f1117;color:#e0e0e0;border:1px solid #2a2d3a;border-radius:6px;padding:9px 11px}
   .redirect-banner{display:none;position:fixed;top:0;left:0;right:0;z-index:200;
     background:#2a5caa;color:#fff;text-align:center;padding:12px;font-size:.9rem;font-weight:600}
+  .toast-container{position:fixed;top:16px;right:16px;z-index:300;display:flex;flex-direction:column;gap:8px;pointer-events:none}
+  .toast{pointer-events:auto;padding:10px 18px;border-radius:8px;font-size:.85rem;font-weight:600;color:#fff;box-shadow:0 4px 20px #0006;animation:toastIn .3s ease,toastOut .3s ease forwards;animation-delay:0s,3s;opacity:0}
+  .toast-success{background:#1a5a2a}
+  .toast-error{background:#7a2020}
+  .toast-info{background:#1a3a6a}
+  @keyframes toastIn{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:translateX(0)}}
+  @keyframes toastOut{from{opacity:1;transform:translateX(0)}to{opacity:0;transform:translateX(20px)}}
 </style>
 </head>
 <body>
 <div class="redirect-banner" id="redirect-banner">
   Redirecting to port 8181…
 </div>
+<div class="toast-container" id="toast-container"></div>
 <header>
   <h1>🐳 FKM Instance Manager</h1>
   <span id="hdr-selected" class="badge">…</span>
@@ -582,16 +595,37 @@ MAIN_HTML = r"""<!DOCTYPE html>
 
 <script>
 const ON_PORT80 = (location.port === '' || location.port === '80');
+const LS_TAB    = 'fkm_active_tab';
+const LS_LOG    = 'fkm_action_log';
+const LS_STATUS = 'fkm_last_status';
 let currentSelected = null;
 let selectedRunning  = false;
 let _switching       = false;
 let _pollTimer       = null;
+let _busyButtons     = new Set();
 
+// ── localStorage helpers ───────────────────────────────────────────────
+function lsSet(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){} }
+function lsGet(k,d){ try{ const v=localStorage.getItem(k); return v!==null?JSON.parse(v):d; }catch(e){ return d; } }
+
+// ── Toast notifications ────────────────────────────────────────────────
+function showToast(msg, type='info') {
+  const c = document.getElementById('toast-container');
+  const t = document.createElement('div');
+  t.className = 'toast toast-' + type;
+  t.textContent = msg;
+  c.appendChild(t);
+  setTimeout(() => { if(t.parentNode) t.remove(); }, 3500);
+}
+
+// ── Tab switching with persistence ─────────────────────────────────────
 function switchTab(name) {
   ['control','env','wifi'].forEach((n,i) => {
     document.querySelectorAll('.tab')[i].classList.toggle('active', n===name);
-    document.querySelectorAll('.panel')[i].classList.toggle('active', n===name);
+    const panel = document.querySelectorAll('.panel')[i];
+    panel.classList.toggle('active', n===name);
   });
+  lsSet(LS_TAB, name);
   if (name==='env')  loadEnv();
   if (name==='wifi') loadWifi();
 }
@@ -610,50 +644,56 @@ async function logout() {
   window.location.href = '/';
 }
 
+function applyStatusData(data) {
+  currentSelected = data.selected;
+  selectedRunning  = data.instances[data.selected] ? data.instances[data.selected].running : false;
+
+  const hdrSel = document.getElementById('hdr-selected');
+  hdrSel.textContent = (data.selected || 'NONE').toUpperCase();
+  hdrSel.className   = 'badge badge-'+(data.selected || 'fkmtest');
+
+  const hdrSt = document.getElementById('hdr-status');
+  hdrSt.textContent = selectedRunning ? 'RUNNING' : 'STOPPED';
+  hdrSt.className   = 'badge '+(selectedRunning ? 'badge-ok' : 'badge-down');
+
+  document.getElementById('action-selected').textContent = currentSelected ? `— selected: ${currentSelected}` : '— no instances';
+
+  renderInstances(data.instances, currentSelected);
+}
+
 async function refreshAll() {
   try {
     const data = await api('/api/status');
     if (!data) return;
-    currentSelected = data.selected;
-    selectedRunning  = data.instances[data.selected] ? data.instances[data.selected].running : false;
-
-    const hdrSel = document.getElementById('hdr-selected');
-    hdrSel.textContent = (data.selected || 'NONE').toUpperCase();
-    hdrSel.className   = 'badge badge-'+(data.selected || 'fkmtest');
-
-    const hdrSt = document.getElementById('hdr-status');
-    hdrSt.textContent = selectedRunning ? 'RUNNING' : 'STOPPED';
-    hdrSt.className   = 'badge '+(selectedRunning ? 'badge-ok' : 'badge-down');
-
-    document.getElementById('action-selected').textContent = currentSelected ? `— selected: ${currentSelected}` : '— no instances';
-
-    renderInstances(data.instances, currentSelected);
+    lsSet(LS_STATUS, data);
+    applyStatusData(data);
   } catch(e) {}
 }
 
 function renderInstances(instances, selected) {
   const container = document.getElementById('instances-container');
   let html = '';
+  let idx = 0;
   for (const [name, info] of Object.entries(instances || {})) {
     const isSel = name === selected;
     let actionButtons = '';
     if (isSel) {
       const isRunning = info.running;
       const toggleHtml = isRunning
-        ? `<button class="btn-danger" style="flex:1" onclick="doAction('stop','${name}')">⏹ Stop</button>`
-        : `<button class="btn-success" style="flex:1" onclick="doAction('start','${name}')">▶ Start</button>`;
+        ? `<button class="btn-danger" style="flex:1" data-action="stop-${name}" onclick="doAction('stop','${name}',this)">⏹ Stop</button>`
+        : `<button class="btn-success" style="flex:1" data-action="start-${name}" onclick="doAction('start','${name}',this)">▶ Start</button>`;
       actionButtons += toggleHtml;
     } else {
-      actionButtons += `<button class="btn-primary" style="flex:1" onclick="startSwitchTo('${name}')">⇄ Activate</button>`;
+      actionButtons += `<button class="btn-primary" style="flex:1" data-action="activate-${name}" onclick="startSwitchTo('${name}',this)">⇄ Activate</button>`;
     }
-    actionButtons += `<button class="btn-neutral" style="flex:1" onclick="doAction('pull','${name}')">⬇ Pull</button>`;
+    actionButtons += `<button class="btn-neutral" style="flex:1" data-action="pull-${name}" onclick="doAction('pull','${name}',this)">⬇ Pull</button>`;
     if (isSel) {
       actionButtons += `<button class="btn-warn" style="flex:1" onclick="openModal()">🗑 Down + Volumes</button>`;
     }
     actionButtons += `<button class="btn-danger" style="flex:1" onclick="showDeleteModal('${name}')">🗑 Delete</button>`;
 
     html += `
-<div class="instance-card${isSel ? ' selected' : ''}${isSel && name === 'prod' ? ' prod' : ''}">
+<div class="instance-card${isSel ? ' selected' : ''}${isSel && name === 'prod' ? ' prod' : ''}" style="animation-delay:${idx*60}ms">
   <div class="row" style="margin-bottom:6px">
     <strong style="color:${name === 'prod' ? '#ff6060' : '#60aaff'}">${name}</strong>
     <span class="badge ${info.running ? 'badge-ok' : 'badge-down'}">${info.running ? 'UP' : 'DOWN'}${isSel ? ' ★' : ''}</span>
@@ -664,14 +704,31 @@ function renderInstances(instances, selected) {
     ${actionButtons}
   </div>
 </div>`;
+    idx++;
   }
   container.innerHTML = html;
 }
 
-async function doAction(action, target=null) {
+function setBtnLoading(btn, loading) {
+  if (!btn) return;
+  if (loading) {
+    btn.disabled = true;
+    btn._origHTML = btn.innerHTML;
+    btn.innerHTML = '<span class="spinner"></span>' + btn.textContent.trim();
+    _busyButtons.add(btn.dataset.action);
+  } else {
+    btn.disabled = false;
+    if (btn._origHTML) btn.innerHTML = btn._origHTML;
+    _busyButtons.delete(btn.dataset.action);
+  }
+}
+
+async function doAction(action, target=null, triggerBtn=null) {
   const log = document.getElementById('action-log');
   log.style.display = 'block';
   log.textContent   = `Running ${action} on ${target || currentSelected || 'selected'}...\n`;
+  lsSet(LS_LOG, log.textContent);
+  setBtnLoading(triggerBtn, true);
   const body = target ? {action, instance: target} : {action};
   if (action === 'start' && ON_PORT80) {
     document.getElementById('redirect-banner').style.display = 'block';
@@ -680,16 +737,20 @@ async function doAction(action, target=null) {
     }, 2200);
   }
   const data = await api('/api/action', body);
+  setBtnLoading(triggerBtn, false);
   if (!data) return;
   log.textContent += data.output || '';
   log.scrollTop    = log.scrollHeight;
+  lsSet(LS_LOG, log.textContent);
+  showToast(`${action} completed on ${target || currentSelected}`, data.ok !== false ? 'success' : 'error');
   await refreshAll();
 }
 
 // Switch / Activate
-async function startSwitchTo(name) {
+async function startSwitchTo(name, triggerBtn=null) {
   if (_switching) return;
   _switching = true;
+  setBtnLoading(triggerBtn, true);
   document.getElementById('action-log').style.display = 'none';
   document.getElementById('switch-progress').style.display = 'block';
   document.getElementById('progress-stages').innerHTML = '';
@@ -733,7 +794,9 @@ async function pollProgress() {
       log.style.display = 'block';
       log.textContent   = data.log;
       log.scrollTop     = log.scrollHeight;
+      lsSet(LS_LOG, data.log);
     }
+    showToast(data.ok ? 'Switch completed successfully' : 'Switch failed', data.ok ? 'success' : 'error');
     setTimeout(() => {
       document.getElementById('switch-progress').style.display = 'none';
     }, 2200);
@@ -768,6 +831,7 @@ async function saveEnv() {
   const msg     = document.getElementById('env-save-msg');
   msg.textContent = data.ok ? '✓ Saved' : ('✗ '+data.error);
   msg.style.color = data.ok ? '#60ff90' : '#ff6060';
+  showToast(data.ok ? 'Environment saved' : 'Failed to save .env', data.ok ? 'success' : 'error');
 }
 
 // WiFi
@@ -800,6 +864,7 @@ async function applyWifi() {
   log.scrollTop    = log.scrollHeight;
   msg.textContent  = data.ok ? '✓ Applied' : '✗ Error';
   msg.style.color  = data.ok ? '#60ff90' : '#ff6060';
+  showToast(data.ok ? 'WiFi settings applied' : 'WiFi apply failed', data.ok ? 'success' : 'error');
 }
 
 // Modals
@@ -835,9 +900,10 @@ async function createNewInstance(name, template) {
   const data = await api('/api/instance/create', {name, template});
   if (!data) return;
   if (data.ok) {
+    showToast(`Instance "${name}" created`, 'success');
     await refreshAll();
   } else {
-    alert('Create failed: ' + (data.error || 'Unknown error'));
+    showToast('Create failed: ' + (data.error || 'Unknown error'), 'error');
   }
 }
 
@@ -861,14 +927,33 @@ async function deleteInstance(name) {
   const data = await api('/api/instance/delete', {name});
   if (!data) return;
   if (data.ok) {
+    showToast(`Instance "${name}" deleted`, 'success');
     await refreshAll();
   } else {
-    alert('Delete failed: ' + (data.error || 'Unknown error'));
+    showToast('Delete failed: ' + (data.error || 'Unknown error'), 'error');
   }
 }
 
-// Boot
+// ── Boot: restore saved state then fetch live data ─────────────────────
 (async () => {
+  // Restore saved tab
+  const savedTab = lsGet(LS_TAB, 'control');
+  if (savedTab !== 'control') switchTab(savedTab);
+
+  // Restore cached status instantly (prevents blank screen on reload)
+  const cached = lsGet(LS_STATUS, null);
+  if (cached && cached.instances) {
+    applyStatusData(cached);
+  }
+
+  // Restore saved action log
+  const savedLog = lsGet(LS_LOG, '');
+  if (savedLog) {
+    const log = document.getElementById('action-log');
+    log.style.display = 'block';
+    log.textContent = savedLog;
+  }
+
   await maybeRestoreProgress();
   await refreshAll();
   setInterval(refreshAll, 10000);
