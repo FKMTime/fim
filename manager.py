@@ -362,6 +362,77 @@ def _do_delete_async(name):
             progress_stage(1, "error", str(e) + "\n")
             progress_done(ok=False)
 
+def _do_wifi_async(hs_ssid, hs_psk, sta_ssid, sta_psk):
+    with _action_lock:
+        stages = []
+        cmds_set = []
+        if hs_ssid:
+            cmds_set += [["uci","set",f"wireless.default_radio1.ssid={hs_ssid}"],
+                         ["uci","set",f"wireless.default_radio2.ssid={hs_ssid}"]]
+        if hs_psk:
+            cmds_set += [["uci","set",f"wireless.default_radio1.key={hs_psk}"],
+                         ["uci","set",f"wireless.default_radio2.key={hs_psk}"]]
+        if sta_ssid:
+            cmds_set.append(["uci","set",f"wireless.default_radio0.ssid={sta_ssid}"])
+        if sta_psk:
+            cmds_set.append(["uci","set",f"wireless.default_radio0.key={sta_psk}"])
+        if not cmds_set:
+            progress_reset(["Apply WiFi"])
+            progress_stage(0, "error", "Nothing to set.\n")
+            progress_done(ok=False)
+            return
+
+        stages = ["Set WiFi parameters", "Commit & reload WiFi"]
+        selected = get_selected()
+        if selected:
+            running, _ = compose_status(selected)
+            if running:
+                stages.append(f"Restart {selected} compose")
+        progress_reset(stages)
+
+        # Stage 0: uci set commands
+        progress_stage(0, "running")
+        ok = True
+        for cmd in cmds_set:
+            log_line = f"$ {' '.join(cmd)}"
+            progress_stage(0, "running", log_line)
+            code, out = run_cmd(cmd, timeout=10)
+            if out.strip():
+                progress_stage(0, "running", out.strip())
+            if code != 0:
+                ok = False
+        progress_stage(0, "done" if ok else "error")
+        if not ok:
+            progress_done(ok=False)
+            return
+
+        # Stage 1: commit + reload
+        progress_stage(1, "running")
+        progress_stage(1, "running", "$ uci commit wireless")
+        code, out = run_cmd(["uci","commit","wireless"], timeout=10)
+        if out.strip():
+            progress_stage(1, "running", out.strip())
+        if code != 0:
+            progress_stage(1, "error", "uci commit failed")
+            progress_done(ok=False)
+            return
+        progress_stage(1, "running", "$ wifi reload")
+        _, out = run_cmd(["wifi","reload"], timeout=15)
+        if out.strip():
+            progress_stage(1, "running", out.strip())
+        progress_stage(1, "done")
+
+        # Stage 2 (optional): restart compose
+        if len(stages) > 2 and selected:
+            progress_stage(2, "running")
+            progress_stage(2, "running", f"$ docker compose restart ({selected})")
+            _, out = run_cmd(["docker","compose","restart"], cwd=get_instances()[selected])
+            if out.strip():
+                progress_stage(2, "running", out.strip())
+            progress_stage(2, "done")
+
+        progress_done(ok=True)
+
 # ── Dynamic port 80 manager ─────────────────────────────────────────────────
 
 _port80_server   = None
@@ -491,7 +562,6 @@ MAIN_HTML = r"""<!DOCTYPE html>
   .field{margin-bottom:12px}
   .split{display:grid;grid-template-columns:1fr 1fr;gap:16px}
   @media(max-width:600px){.split{grid-template-columns:1fr}}
-  .log-box{background:#0f1117;border:1px solid #2a2d3a;border-radius:6px;padding:10px;font-family:'Courier New',monospace;font-size:.78rem;white-space:pre-wrap;max-height:260px;overflow-y:auto;color:#b0c0a0;margin-top:12px;display:none}
   .instance-list{display:flex;flex-direction:column;gap:6px}
   .instance-row{display:flex;align-items:center;gap:12px;padding:10px 14px;background:#1a1d27;border:1px solid #2a2d3a;border-radius:8px;border-left:4px solid #333;transition:border-color .3s ease}
   .instance-row.animate-in{animation:rowIn .3s ease both}
@@ -674,7 +744,6 @@ MAIN_HTML = r"""<!DOCTYPE html>
         <button class="btn-neutral" onclick="loadWifi()">↻ Reload Current</button>
         <span id="wifi-msg" style="font-size:.82rem"></span>
       </div>
-      <div id="wifi-log" class="log-box"></div>
     </div>
   </div>
 </main>
@@ -903,6 +972,10 @@ async function pollProgress() {
   try { data = await api('/api/progress'); } catch(e) { return; }
   if (!data) return;
   renderProgress(data);
+  // Live-update output panel while action is running
+  if (data.log) {
+    showOutput(data.log);
+  }
   if (data.done) {
     clearInterval(_pollTimer);
     _pollTimer = null;
@@ -910,9 +983,6 @@ async function pollProgress() {
     setTimeout(() => {
       document.getElementById('progress-modal-overlay').classList.remove('show');
     }, 1200);
-    if (data.log) {
-      showOutput(data.log);
-    }
     showToast(data.ok ? 'Action completed successfully' : 'Action failed', data.ok ? 'success' : 'error');
     await refreshAll();
   }
@@ -962,9 +1032,9 @@ async function loadWifi() {
 }
 
 async function applyWifi() {
-  const log = document.getElementById('wifi-log');
+  if (_busy) return;
   const msg = document.getElementById('wifi-msg');
-  log.style.display = 'block'; log.textContent = 'Applying...\n'; msg.textContent = '';
+  msg.textContent = '';
   const body = {
     hs_ssid: document.getElementById('hs-ssid').value,
     hs_psk:  document.getElementById('hs-psk').value,
@@ -972,12 +1042,13 @@ async function applyWifi() {
     sta_psk: document.getElementById('sta-psk').value,
   };
   const data = await api('/api/wifi', body);
-  if (!data) return;
-  log.textContent += data.output || '';
-  log.scrollTop    = log.scrollHeight;
-  msg.textContent  = data.ok ? '✓ Applied' : '✗ Error';
-  msg.style.color  = data.ok ? '#60ff90' : '#ff6060';
-  showToast(data.ok ? 'WiFi settings applied' : 'WiFi apply failed', data.ok ? 'success' : 'error');
+  if (!data || !data.ok) {
+    showToast(data?.error || 'WiFi apply failed', 'error');
+    msg.textContent = '✗ ' + (data?.error || 'Error');
+    msg.style.color = '#ff6060';
+    return;
+  }
+  startProgressPolling();
 }
 
 // Modals
@@ -1234,49 +1305,23 @@ class Handler(BaseHTTPRequestHandler):
             threading.Thread(target=_do_delete_async, args=(name,), daemon=True).start()
             self.send_json({"ok": True})
         elif path == "/api/wifi":
-            self._handle_wifi(body)
+            hs_ssid  = body.get("hs_ssid", "")
+            hs_psk   = body.get("hs_psk", "")
+            sta_ssid = body.get("sta_ssid", "")
+            sta_psk  = body.get("sta_psk", "")
+            if not any([hs_ssid, hs_psk, sta_ssid, sta_psk]):
+                self.send_json({"ok": False, "error": "Nothing to set"})
+                return
+            if not _action_lock.acquire(blocking=False):
+                self.send_json({"ok": False, "error": "Action already running"})
+                return
+            _action_lock.release()
+            threading.Thread(target=_do_wifi_async,
+                             args=(hs_ssid, hs_psk, sta_ssid, sta_psk),
+                             daemon=True).start()
+            self.send_json({"ok": True})
         else:
             self.send_response(404); self.end_headers()
-
-    def _handle_wifi(self, body):
-        hs_ssid  = body.get("hs_ssid", "")
-        hs_psk   = body.get("hs_psk", "")
-        sta_ssid = body.get("sta_ssid", "")
-        sta_psk  = body.get("sta_psk", "")
-        cmds = []
-        if hs_ssid:
-            cmds += [["uci","set",f"wireless.default_radio1.ssid={hs_ssid}"],
-                     ["uci","set",f"wireless.default_radio2.ssid={hs_ssid}"]]
-        if hs_psk:
-            cmds += [["uci","set",f"wireless.default_radio1.key={hs_psk}"],
-                     ["uci","set",f"wireless.default_radio2.key={hs_psk}"]]
-        if sta_ssid:
-            cmds.append(["uci","set",f"wireless.default_radio0.ssid={sta_ssid}"])
-        if sta_psk:
-            cmds.append(["uci","set",f"wireless.default_radio0.key={sta_psk}"])
-        if not cmds:
-            self.send_json({"ok": False, "output": "Nothing to set.\n"}); return
-        output, ok = "", True
-        for cmd in cmds:
-            output += f"$ {' '.join(cmd)}\n"
-            code, out = run_cmd(cmd, timeout=10)
-            if out.strip(): output += out + "\n"
-            if code != 0: ok = False
-        output += "$ uci commit wireless\n"
-        code, out = run_cmd(["uci","commit","wireless"], timeout=10)
-        if out.strip(): output += out + "\n"
-        if code != 0: ok = False
-        output += "$ wifi reload\n"
-        _, out = run_cmd(["wifi","reload"], timeout=15)
-        if out.strip(): output += out + "\n"
-        selected = get_selected()
-        if selected:
-            running, _ = compose_status(selected)
-            if running:
-                output += f"\n=== Restarting {selected} compose ===\n"
-                _, out = run_cmd(["docker","compose","restart"], cwd=get_instances()[selected])
-                output += out
-        self.send_json({"ok": ok, "output": output})
 
 # ── Main ────────────────────────────────────────────────────────────────────
 
