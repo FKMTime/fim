@@ -492,15 +492,21 @@ MAIN_HTML = r"""<!DOCTYPE html>
   .split{display:grid;grid-template-columns:1fr 1fr;gap:16px}
   @media(max-width:600px){.split{grid-template-columns:1fr}}
   .log-box{background:#0f1117;border:1px solid #2a2d3a;border-radius:6px;padding:10px;font-family:'Courier New',monospace;font-size:.78rem;white-space:pre-wrap;max-height:260px;overflow-y:auto;color:#b0c0a0;margin-top:12px;display:none}
-  .instance-card{border-left:4px solid #333;padding-left:12px;margin-bottom:10px;transition:border-color .3s ease}
-  .instance-card.animate-in{animation:cardIn .3s ease both}
-  @keyframes cardIn{from{opacity:0;transform:translateX(-6px)}to{opacity:1;transform:translateX(0)}}
-  .instance-card .btn-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:14px}
-  .instance-card .btn-grid button{width:100%;padding:8px 6px;font-size:.82rem}
-  .instance-card.selected{border-left-color:#60aaff}
-  .instance-card.selected.prod{border-left-color:#ff6060}
+  .instance-list{display:flex;flex-direction:column;gap:6px}
+  .instance-row{display:flex;align-items:center;gap:12px;padding:10px 14px;background:#1a1d27;border:1px solid #2a2d3a;border-radius:8px;border-left:4px solid #333;transition:border-color .3s ease}
+  .instance-row.animate-in{animation:rowIn .3s ease both}
+  @keyframes rowIn{from{opacity:0;transform:translateX(-6px)}to{opacity:1;transform:translateX(0)}}
+  .instance-row.selected{border-left-color:#60aaff}
+  .instance-row.selected.prod{border-left-color:#ff6060}
+  .instance-row .inst-name{font-weight:600;font-size:.9rem;min-width:80px}
+  .instance-row .inst-actions{display:flex;gap:6px;margin-left:auto;flex-wrap:wrap}
+  .instance-row .inst-actions button{padding:6px 12px;font-size:.78rem;white-space:nowrap}
   .section-title{font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#555;margin-bottom:10px}
-  #switch-progress{display:none;margin-top:14px}
+  .progress-modal-overlay{display:none;position:fixed;inset:0;background:#000b;z-index:150;align-items:center;justify-content:center;opacity:0;transition:opacity .2s ease}
+  .progress-modal-overlay.show{display:flex;opacity:1}
+  .progress-modal{background:#1a1d27;border:1px solid #2a2d3a;border-radius:12px;padding:28px;max-width:480px;width:90%;box-shadow:0 8px 40px #0009;transform:scale(.95);transition:transform .2s ease}
+  .progress-modal-overlay.show .progress-modal{transform:scale(1)}
+  .progress-modal h3{font-size:1rem;font-weight:600;color:#fff;margin-bottom:16px}
   .progress-stages{display:flex;flex-direction:column;gap:8px;margin-bottom:10px}
   .stage-row{display:flex;align-items:center;gap:10px;font-size:.85rem}
   .stage-icon{width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.75rem;flex-shrink:0;transition:all .3s;font-weight:700}
@@ -515,7 +521,14 @@ MAIN_HTML = r"""<!DOCTYPE html>
   .progress-track{height:5px;background:#2a2d3a;border-radius:3px;overflow:hidden;margin-bottom:12px}
   .progress-fill{height:100%;background:linear-gradient(90deg,#2a5caa,#60aaff);border-radius:3px;transition:width .5s ease;width:0%}
   @keyframes pulse{0%,100%{box-shadow:0 0 0 0 #2a5caa88}50%{box-shadow:0 0 0 6px #2a5caa00}}
-  .instances-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}
+  .output-panel{position:fixed;bottom:0;left:0;right:0;z-index:50;background:#131620;border-top:1px solid #2a2d3a;transition:transform .3s ease;transform:translateY(100%)}
+  .output-panel.show{transform:translateY(0)}
+  .output-panel-header{display:flex;align-items:center;padding:8px 16px;cursor:pointer;gap:10px;user-select:none}
+  .output-panel-header span{font-size:.8rem;font-weight:600;color:#888}
+  .output-panel-header .chevron{transition:transform .2s;color:#666}
+  .output-panel-header .chevron.up{transform:rotate(180deg)}
+  .output-panel-body{max-height:220px;overflow-y:auto;padding:0 16px 12px;font-family:'Courier New',monospace;font-size:.78rem;white-space:pre-wrap;color:#b0c0a0;transition:max-height .3s ease}
+  .output-panel-body.collapsed{max-height:0;padding-bottom:0;overflow:hidden}
   .modal-overlay{display:none;position:fixed;inset:0;background:#000b;z-index:100;align-items:center;justify-content:center;opacity:0;transition:opacity .2s ease}
   .modal-overlay.show{display:flex;opacity:1}
   .modal{background:#1a1d27;border:1px solid #3a2020;border-radius:12px;padding:28px;max-width:420px;width:90%;box-shadow:0 8px 40px #0009;transform:scale(.95);transition:transform .2s ease}
@@ -602,6 +615,15 @@ MAIN_HTML = r"""<!DOCTYPE html>
   </div>
 </div>
 
+<!-- Progress modal overlay -->
+<div id="progress-modal-overlay" class="progress-modal-overlay">
+  <div class="progress-modal">
+    <h3 id="progress-modal-title">⏳ Action in progress…</h3>
+    <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
+    <div class="progress-stages" id="progress-stages"></div>
+  </div>
+</div>
+
 <main>
   <div class="tabs">
     <div class="tab active" onclick="switchTab('control')">Control</div>
@@ -610,19 +632,11 @@ MAIN_HTML = r"""<!DOCTYPE html>
   </div>
   <div class="panel active" id="tab-control">
     <div class="card">
-      <h2>Instances</h2>
-      <div class="row" style="justify-content:flex-end;margin-bottom:16px">
+      <h2>Instances <span id="action-selected" style="color:#666;font-weight:400;font-size:.85rem">— loading…</span></h2>
+      <div class="row" style="justify-content:flex-end;margin-bottom:12px">
         <button class="btn-neutral" onclick="showCreateModal()">+ New Instance</button>
       </div>
-      <div id="instances-container" class="instances-grid"></div>
-    </div>
-    <div class="card">
-      <h2>Actions <span id="action-selected" style="color:#666;font-weight:400;font-size:.85rem">— loading…</span></h2>
-      <div id="switch-progress">
-        <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
-        <div class="progress-stages" id="progress-stages"></div>
-      </div>
-      <div id="action-log" class="log-box"></div>
+      <div id="instances-container" class="instance-list"></div>
     </div>
   </div>
   <div class="panel" id="tab-env">
@@ -665,6 +679,17 @@ MAIN_HTML = r"""<!DOCTYPE html>
   </div>
 </main>
 
+<!-- Collapsible output panel -->
+<div id="output-panel" class="output-panel">
+  <div class="output-panel-header" onclick="toggleOutputPanel()">
+    <span>📋 Command Output</span>
+    <span class="chevron" id="output-chevron">▲</span>
+    <span style="flex:1"></span>
+    <button class="btn-neutral" style="padding:3px 10px;font-size:.72rem" onclick="event.stopPropagation();clearOutput()">Clear</button>
+  </div>
+  <div class="output-panel-body" id="output-body"></div>
+</div>
+
 <script>
 const ON_PORT80 = (location.port === '' || location.port === '80');
 const LS_TAB    = 'fkm_active_tab';
@@ -676,6 +701,31 @@ let _busy            = false;
 let _pollTimer       = null;
 let _busyButtons     = new Set();
 let _firstRender     = true;
+
+let _outputCollapsed = false;
+
+// ── Output panel helpers ───────────────────────────────────────────────
+function toggleOutputPanel() {
+  _outputCollapsed = !_outputCollapsed;
+  document.getElementById('output-body').classList.toggle('collapsed', _outputCollapsed);
+  document.getElementById('output-chevron').classList.toggle('up', !_outputCollapsed);
+}
+function showOutput(text) {
+  const panel = document.getElementById('output-panel');
+  const body = document.getElementById('output-body');
+  body.textContent = text;
+  panel.classList.add('show');
+  _outputCollapsed = false;
+  document.getElementById('output-body').classList.remove('collapsed');
+  document.getElementById('output-chevron').classList.add('up');
+  body.scrollTop = body.scrollHeight;
+  lsSet(LS_LOG, text);
+}
+function clearOutput() {
+  document.getElementById('output-panel').classList.remove('show');
+  document.getElementById('output-body').textContent = '';
+  lsSet(LS_LOG, '');
+}
 
 // ── localStorage helpers ───────────────────────────────────────────────
 function lsSet(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){} }
@@ -750,33 +800,25 @@ function renderInstances(instances, selected) {
   const animCls = _firstRender ? ' animate-in' : '';
   for (const [name, info] of Object.entries(instances || {})) {
     const isSel = name === selected;
-    let actionButtons = '';
+    let btns = '';
     if (isSel) {
-      const isRunning = info.running;
-      actionButtons += isRunning
+      btns += info.running
         ? `<button class="btn-danger" data-action="stop-${name}" onclick="doAction('stop','${name}',this)">⏹ Stop</button>`
         : `<button class="btn-success" data-action="start-${name}" onclick="doAction('start','${name}',this)">▶ Start</button>`;
     } else {
-      actionButtons += `<button class="btn-primary" data-action="activate-${name}" onclick="startSwitchTo('${name}',this)">⇄ Activate</button>`;
+      btns += `<button class="btn-primary" data-action="activate-${name}" onclick="startSwitchTo('${name}',this)">⇄ Activate</button>`;
     }
-    actionButtons += `<button class="btn-neutral" data-action="pull-${name}" onclick="doAction('pull','${name}',this)">⬇ Pull</button>`;
+    btns += `<button class="btn-neutral" data-action="pull-${name}" onclick="doAction('pull','${name}',this)">⬇ Pull</button>`;
     if (isSel) {
-      actionButtons += `<button class="btn-warn" onclick="openModal()">🧹 Clear Data</button>`;
+      btns += `<button class="btn-warn" onclick="openModal()">🧹 Clear</button>`;
     }
-    const spanFull = !isSel; // non-selected has 3 buttons (odd), last spans full
-    actionButtons += `<button class="btn-danger"${spanFull ? ' style="grid-column:span 2"' : ''} onclick="showDeleteModal('${name}')">🗑 Delete</button>`;
+    btns += `<button class="btn-danger" onclick="showDeleteModal('${name}')">🗑</button>`;
 
     html += `
-<div class="instance-card${isSel ? ' selected' : ''}${isSel && name === 'prod' ? ' prod' : ''}${animCls}" style="${_firstRender ? 'animation-delay:'+Math.min(idx*40,200)+'ms' : ''}">
-  <div class="row" style="margin-bottom:6px">
-    <strong style="color:${name === 'prod' ? '#ff6060' : '#60aaff'}">${name}</strong>
-    <span class="badge ${info.running ? 'badge-ok' : 'badge-down'}">${info.running ? 'UP' : 'DOWN'}${isSel ? ' ★' : ''}</span>
-  </div>
-  <div style="font-size:.78rem;color:#555;margin-bottom:8px" title="${info.path}">${info.path}</div>
-  <div class="status-box${info.running ? '' : ' err'}">${info.status_text || '—'}</div>
-  <div class="btn-grid">
-    ${actionButtons}
-  </div>
+<div class="instance-row${isSel ? ' selected' : ''}${isSel && name === 'prod' ? ' prod' : ''}${animCls}" style="${_firstRender ? 'animation-delay:'+Math.min(idx*40,200)+'ms' : ''}">
+  <span class="inst-name" style="color:${name === 'prod' ? '#ff6060' : '#60aaff'}">${name}</span>
+  <span class="badge ${info.running ? 'badge-ok' : 'badge-down'}">${info.running ? 'UP' : 'DOWN'}${isSel ? ' ★' : ''}</span>
+  <div class="inst-actions">${btns}</div>
 </div>`;
     idx++;
   }
@@ -801,8 +843,7 @@ function setBtnLoading(btn, loading) {
 function startProgressPolling() {
   _busy = true;
   if (_pollTimer) clearInterval(_pollTimer);
-  document.getElementById('action-log').style.display = 'none';
-  document.getElementById('switch-progress').style.display = 'block';
+  document.getElementById('progress-modal-overlay').classList.add('show');
   document.getElementById('progress-stages').innerHTML = '';
   document.getElementById('progress-fill').style.width = '0%';
   _pollTimer = setInterval(pollProgress, 600);
@@ -866,17 +907,13 @@ async function pollProgress() {
     clearInterval(_pollTimer);
     _pollTimer = null;
     _busy = false;
+    setTimeout(() => {
+      document.getElementById('progress-modal-overlay').classList.remove('show');
+    }, 1200);
     if (data.log) {
-      const log = document.getElementById('action-log');
-      log.style.display = 'block';
-      log.textContent   = data.log;
-      log.scrollTop     = log.scrollHeight;
-      lsSet(LS_LOG, data.log);
+      showOutput(data.log);
     }
     showToast(data.ok ? 'Action completed successfully' : 'Action failed', data.ok ? 'success' : 'error');
-    setTimeout(() => {
-      document.getElementById('switch-progress').style.display = 'none';
-    }, 2200);
     await refreshAll();
   }
 }
@@ -885,8 +922,7 @@ async function maybeRestoreProgress() {
   const data = await api('/api/progress');
   if (!data || data.done) return;
   _busy = true;
-  document.getElementById('action-log').style.display = 'none';
-  document.getElementById('switch-progress').style.display = 'block';
+  document.getElementById('progress-modal-overlay').classList.add('show');
   renderProgress(data);
   _pollTimer = setInterval(pollProgress, 600);
 }
@@ -1022,12 +1058,10 @@ async function deleteInstance(name) {
     applyStatusData(cached);
   }
 
-  // Restore saved action log
+  // Restore saved output panel
   const savedLog = lsGet(LS_LOG, '');
   if (savedLog) {
-    const log = document.getElementById('action-log');
-    log.style.display = 'block';
-    log.textContent = savedLog;
+    showOutput(savedLog);
   }
 
   await maybeRestoreProgress();
