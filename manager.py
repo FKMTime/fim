@@ -694,8 +694,8 @@ function renderInstances(instances, selected) {
     if (isSel) {
       actionButtons += `<button class="btn-warn" onclick="openModal()">🧹 Clear Data</button>`;
     }
-    const oddCount = isSel ? 0 : 1; // non-selected has 3 buttons (odd), last spans full
-    actionButtons += `<button class="btn-danger"${oddCount ? ' style="grid-column:span 2"' : ''} onclick="showDeleteModal('${name}')">🗑 Delete</button>`;
+    const spanFull = !isSel; // non-selected has 3 buttons (odd), last spans full
+    actionButtons += `<button class="btn-danger"${spanFull ? ' style="grid-column:span 2"' : ''} onclick="showDeleteModal('${name}')">🗑 Delete</button>`;
 
     html += `
 <div class="instance-card${isSel ? ' selected' : ''}${isSel && name === 'prod' ? ' prod' : ''}${animCls}" style="${_firstRender ? 'animation-delay:'+Math.min(idx*40,200)+'ms' : ''}">
