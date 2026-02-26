@@ -423,8 +423,11 @@ MAIN_HTML = r"""<!DOCTYPE html>
   .split{display:grid;grid-template-columns:1fr 1fr;gap:16px}
   @media(max-width:600px){.split{grid-template-columns:1fr}}
   .log-box{background:#0f1117;border:1px solid #2a2d3a;border-radius:6px;padding:10px;font-family:'Courier New',monospace;font-size:.78rem;white-space:pre-wrap;max-height:260px;overflow-y:auto;color:#b0c0a0;margin-top:12px;display:none}
-  .instance-card{border-left:4px solid #333;padding-left:12px;margin-bottom:10px;transition:border-color .3s ease,opacity .3s ease;animation:cardIn .3s ease both}
+  .instance-card{border-left:4px solid #333;padding-left:12px;margin-bottom:10px;transition:border-color .3s ease}
+  .instance-card.animate-in{animation:cardIn .3s ease both}
   @keyframes cardIn{from{opacity:0;transform:translateX(-6px)}to{opacity:1;transform:translateX(0)}}
+  .instance-card .btn-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:14px}
+  .instance-card .btn-grid button{width:100%;padding:8px 6px;font-size:.82rem}
   .instance-card.selected{border-left-color:#60aaff}
   .instance-card.selected.prod{border-left-color:#ff6060}
   .section-title{font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#555;margin-bottom:10px}
@@ -603,6 +606,7 @@ let selectedRunning  = false;
 let _switching       = false;
 let _pollTimer       = null;
 let _busyButtons     = new Set();
+let _firstRender     = true;
 
 // ── localStorage helpers ───────────────────────────────────────────────
 function lsSet(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){} }
@@ -674,39 +678,41 @@ function renderInstances(instances, selected) {
   const container = document.getElementById('instances-container');
   let html = '';
   let idx = 0;
+  const animCls = _firstRender ? ' animate-in' : '';
   for (const [name, info] of Object.entries(instances || {})) {
     const isSel = name === selected;
     let actionButtons = '';
     if (isSel) {
       const isRunning = info.running;
-      const toggleHtml = isRunning
-        ? `<button class="btn-danger" style="flex:1" data-action="stop-${name}" onclick="doAction('stop','${name}',this)">⏹ Stop</button>`
-        : `<button class="btn-success" style="flex:1" data-action="start-${name}" onclick="doAction('start','${name}',this)">▶ Start</button>`;
-      actionButtons += toggleHtml;
+      actionButtons += isRunning
+        ? `<button class="btn-danger" data-action="stop-${name}" onclick="doAction('stop','${name}',this)">⏹ Stop</button>`
+        : `<button class="btn-success" data-action="start-${name}" onclick="doAction('start','${name}',this)">▶ Start</button>`;
     } else {
-      actionButtons += `<button class="btn-primary" style="flex:1" data-action="activate-${name}" onclick="startSwitchTo('${name}',this)">⇄ Activate</button>`;
+      actionButtons += `<button class="btn-primary" data-action="activate-${name}" onclick="startSwitchTo('${name}',this)">⇄ Activate</button>`;
     }
-    actionButtons += `<button class="btn-neutral" style="flex:1" data-action="pull-${name}" onclick="doAction('pull','${name}',this)">⬇ Pull</button>`;
+    actionButtons += `<button class="btn-neutral" data-action="pull-${name}" onclick="doAction('pull','${name}',this)">⬇ Pull</button>`;
     if (isSel) {
-      actionButtons += `<button class="btn-warn" style="flex:1" onclick="openModal()">🗑 Down + Volumes</button>`;
+      actionButtons += `<button class="btn-warn" onclick="openModal()">🧹 Clear Data</button>`;
     }
-    actionButtons += `<button class="btn-danger" style="flex:1" onclick="showDeleteModal('${name}')">🗑 Delete</button>`;
+    const oddCount = isSel ? 0 : 1; // non-selected has 3 buttons (odd), last spans full
+    actionButtons += `<button class="btn-danger"${oddCount ? ' style="grid-column:span 2"' : ''} onclick="showDeleteModal('${name}')">🗑 Delete</button>`;
 
     html += `
-<div class="instance-card${isSel ? ' selected' : ''}${isSel && name === 'prod' ? ' prod' : ''}" style="animation-delay:${Math.min(idx*40,200)}ms">
+<div class="instance-card${isSel ? ' selected' : ''}${isSel && name === 'prod' ? ' prod' : ''}${animCls}" style="${_firstRender ? 'animation-delay:'+Math.min(idx*40,200)+'ms' : ''}">
   <div class="row" style="margin-bottom:6px">
     <strong style="color:${name === 'prod' ? '#ff6060' : '#60aaff'}">${name}</strong>
     <span class="badge ${info.running ? 'badge-ok' : 'badge-down'}">${info.running ? 'UP' : 'DOWN'}${isSel ? ' ★' : ''}</span>
   </div>
   <div style="font-size:.78rem;color:#555;margin-bottom:8px" title="${info.path}">${info.path}</div>
   <div class="status-box${info.running ? '' : ' err'}">${info.status_text || '—'}</div>
-  <div class="row" style="margin-top:14px;gap:6px;flex-wrap:wrap">
+  <div class="btn-grid">
     ${actionButtons}
   </div>
 </div>`;
     idx++;
   }
   container.innerHTML = html;
+  _firstRender = false;
 }
 
 function setBtnLoading(btn, loading) {
