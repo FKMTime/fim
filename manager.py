@@ -293,6 +293,75 @@ def _do_switch_to(target):
         progress_stage(2, "done", f"Selected: {target}\n")
         progress_done(ok=True)
 
+# ── Async action worker ─────────────────────────────────────────────────────
+
+def _do_action_async(action, target):
+    with _action_lock:
+        insts = get_instances()
+        use_name = target if (target and target in insts) else get_selected()
+        if not use_name or use_name not in insts:
+            progress_reset([action])
+            progress_stage(0, "error", "No valid instance selected\n")
+            progress_done(ok=False)
+            return
+        cwd = insts[use_name]
+        label_map = {
+            "pull": f"Pull images for {use_name}",
+            "stop": f"Stop {use_name}",
+            "start": f"Start {use_name}",
+            "down_volumes": f"Clear data for {use_name}",
+        }
+        cmd_map = {
+            "pull": ["docker", "compose", "pull"],
+            "stop": ["docker", "compose", "down"],
+            "start": ["docker", "compose", "up", "-d"],
+            "down_volumes": ["docker", "compose", "down", "--volumes"],
+        }
+        label = label_map.get(action, action)
+        cmd = cmd_map.get(action)
+        if not cmd:
+            progress_reset([label])
+            progress_stage(0, "error", "Unknown action\n")
+            progress_done(ok=False)
+            return
+        progress_reset([label])
+        progress_stage(0, "running")
+        code, out = run_cmd(cmd, cwd=cwd)
+        progress_stage(0, "done" if code == 0 else "error", out)
+        progress_done(ok=code == 0)
+
+def _do_delete_async(name):
+    with _action_lock:
+        insts = get_instances()
+        if name not in insts:
+            progress_reset([f"Delete {name}"])
+            progress_stage(0, "error", "Instance not found\n")
+            progress_done(ok=False)
+            return
+        path = insts[name]
+        progress_reset([f"Stop containers for {name}", f"Remove {name}"])
+        progress_stage(0, "running")
+        code, out = run_cmd(["docker", "compose", "down", "--volumes"], cwd=path, timeout=90)
+        progress_stage(0, "done" if code == 0 else "error", out)
+        progress_stage(1, "running")
+        try:
+            shutil.rmtree(path)
+            refresh_instances()
+            if get_selected() == name:
+                new_insts = get_instances()
+                if new_insts:
+                    set_selected(next(iter(new_insts)))
+                else:
+                    try:
+                        os.unlink(LOCK_FILE)
+                    except Exception:
+                        pass
+            progress_stage(1, "done", f"Instance {name} removed\n")
+            progress_done(ok=True)
+        except Exception as e:
+            progress_stage(1, "error", str(e) + "\n")
+            progress_done(ok=False)
+
 # ── Dynamic port 80 manager ─────────────────────────────────────────────────
 
 _port80_server   = None
@@ -603,7 +672,7 @@ const LS_LOG    = 'fkm_action_log';
 const LS_STATUS = 'fkm_last_status';
 let currentSelected = null;
 let selectedRunning  = false;
-let _switching       = false;
+let _busy            = false;
 let _pollTimer       = null;
 let _busyButtons     = new Set();
 let _firstRender     = true;
@@ -729,38 +798,38 @@ function setBtnLoading(btn, loading) {
   }
 }
 
+function startProgressPolling() {
+  _busy = true;
+  document.getElementById('action-log').style.display = 'none';
+  document.getElementById('switch-progress').style.display = 'block';
+  document.getElementById('progress-stages').innerHTML = '';
+  document.getElementById('progress-fill').style.width = '0%';
+  _pollTimer = setInterval(pollProgress, 600);
+}
+
 async function doAction(action, target=null, triggerBtn=null) {
-  const log = document.getElementById('action-log');
-  log.style.display = 'block';
-  log.textContent   = `Running ${action} on ${target || currentSelected || 'selected'}...\n`;
-  lsSet(LS_LOG, log.textContent);
+  if (_busy) return;
   setBtnLoading(triggerBtn, true);
-  const body = target ? {action, instance: target} : {action};
   if (action === 'start' && ON_PORT80) {
     document.getElementById('redirect-banner').style.display = 'block';
     setTimeout(() => {
       window.location.href = 'http://' + location.hostname + ':8181/';
     }, 2200);
   }
+  const body = target ? {action, instance: target} : {action};
   const data = await api('/api/action', body);
   setBtnLoading(triggerBtn, false);
-  if (!data) return;
-  log.textContent += data.output || '';
-  log.scrollTop    = log.scrollHeight;
-  lsSet(LS_LOG, log.textContent);
-  showToast(`${action} completed on ${target || currentSelected}`, data.ok === true ? 'success' : 'error');
-  await refreshAll();
+  if (!data || !data.ok) {
+    showToast(data?.error || 'Action failed', 'error');
+    return;
+  }
+  startProgressPolling();
 }
 
 // Switch / Activate
 async function startSwitchTo(name, triggerBtn=null) {
-  if (_switching) return;
-  _switching = true;
+  if (_busy) return;
   setBtnLoading(triggerBtn, true);
-  document.getElementById('action-log').style.display = 'none';
-  document.getElementById('switch-progress').style.display = 'block';
-  document.getElementById('progress-stages').innerHTML = '';
-  document.getElementById('progress-fill').style.width = '0%';
   if (ON_PORT80) {
     document.getElementById('redirect-banner').style.display = 'block';
     setTimeout(() => {
@@ -768,7 +837,8 @@ async function startSwitchTo(name, triggerBtn=null) {
     }, 2800);
   }
   await api('/api/switch_to', {target: name});
-  _pollTimer = setInterval(pollProgress, 600);
+  setBtnLoading(triggerBtn, false);
+  startProgressPolling();
 }
 
 function renderProgress(data) {
@@ -794,7 +864,7 @@ async function pollProgress() {
   if (data.done) {
     clearInterval(_pollTimer);
     _pollTimer = null;
-    _switching = false;
+    _busy = false;
     if (data.log) {
       const log = document.getElementById('action-log');
       log.style.display = 'block';
@@ -802,7 +872,7 @@ async function pollProgress() {
       log.scrollTop     = log.scrollHeight;
       lsSet(LS_LOG, data.log);
     }
-    showToast(data.ok ? 'Switch completed successfully' : 'Switch failed', data.ok ? 'success' : 'error');
+    showToast(data.ok ? 'Action completed successfully' : 'Action failed', data.ok ? 'success' : 'error');
     setTimeout(() => {
       document.getElementById('switch-progress').style.display = 'none';
     }, 2200);
@@ -813,7 +883,7 @@ async function pollProgress() {
 async function maybeRestoreProgress() {
   const data = await api('/api/progress');
   if (!data || data.done) return;
-  _switching = true;
+  _busy = true;
   document.getElementById('action-log').style.display = 'none';
   document.getElementById('switch-progress').style.display = 'block';
   renderProgress(data);
@@ -930,14 +1000,13 @@ function confirmDeleteInstance() {
   deleteInstance(name);
 }
 async function deleteInstance(name) {
+  if (_busy) return;
   const data = await api('/api/instance/delete', {name});
-  if (!data) return;
-  if (data.ok) {
-    showToast(`Instance "${name}" deleted`, 'success');
-    await refreshAll();
-  } else {
-    showToast('Delete failed: ' + (data.error || 'Unknown error'), 'error');
+  if (!data || !data.ok) {
+    showToast('Delete failed: ' + (data?.error || 'Unknown error'), 'error');
+    return;
   }
+  startProgressPolling();
 }
 
 // ── Boot: restore saved state then fetch live data ─────────────────────
@@ -1100,8 +1169,11 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/action":
             action = body.get("action")
             target = body.get("instance")
-            with _action_lock:
-                self._handle_action(action, target)
+            if _action_lock.locked():
+                self.send_json({"ok": False, "error": "Action already running"})
+                return
+            threading.Thread(target=_do_action_async, args=(action, target), daemon=True).start()
+            self.send_json({"ok": True})
         elif path == "/api/env/save":
             selected = get_selected()
             try:
@@ -1116,39 +1188,18 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"ok": ok, "error": err if not ok else None})
         elif path == "/api/instance/delete":
             name = body.get("name", "").strip()
-            ok, err = delete_instance(name)
-            self.send_json({"ok": ok, "error": err if not ok else None})
+            if not name or name not in get_instances():
+                self.send_json({"ok": False, "error": "Instance not found"})
+                return
+            if _action_lock.locked():
+                self.send_json({"ok": False, "error": "Action already running"})
+                return
+            threading.Thread(target=_do_delete_async, args=(name,), daemon=True).start()
+            self.send_json({"ok": True})
         elif path == "/api/wifi":
             self._handle_wifi(body)
         else:
             self.send_response(404); self.end_headers()
-
-    def _handle_action(self, action, target=None):
-        insts = get_instances()
-        if target and target in insts:
-            use_name = target
-        else:
-            use_name = get_selected()
-        if not use_name or use_name not in insts:
-            self.send_json({"ok": False, "output": "No valid instance selected"})
-            return
-        cwd = insts[use_name]
-        output = f"=== {action.upper()} on {use_name} ===\n"
-        if action == "pull":
-            _, out = run_cmd(["docker", "compose", "pull"], cwd=cwd)
-            output += out
-        elif action == "stop":
-            _, out = run_cmd(["docker", "compose", "down"], cwd=cwd)
-            output += out
-        elif action == "start":
-            _, out = run_cmd(["docker", "compose", "up", "-d"], cwd=cwd)
-            output += out
-        elif action == "down_volumes":
-            _, out = run_cmd(["docker", "compose", "down", "--volumes"], cwd=cwd)
-            output += out
-        else:
-            output = "Unknown action\n"
-        self.send_json({"ok": True, "output": output})
 
     def _handle_wifi(self, body):
         hs_ssid  = body.get("hs_ssid", "")
