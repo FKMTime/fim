@@ -615,7 +615,7 @@ function showToast(msg, type='info') {
   t.className = 'toast toast-' + type;
   t.textContent = msg;
   c.appendChild(t);
-  setTimeout(() => { if(t.parentNode) t.remove(); }, 3500);
+  setTimeout(() => { if(t.parentNode) t.remove(); }, 3300);
 }
 
 // ── Tab switching with persistence ─────────────────────────────────────
@@ -693,7 +693,7 @@ function renderInstances(instances, selected) {
     actionButtons += `<button class="btn-danger" style="flex:1" onclick="showDeleteModal('${name}')">🗑 Delete</button>`;
 
     html += `
-<div class="instance-card${isSel ? ' selected' : ''}${isSel && name === 'prod' ? ' prod' : ''}" style="animation-delay:${idx*60}ms">
+<div class="instance-card${isSel ? ' selected' : ''}${isSel && name === 'prod' ? ' prod' : ''}" style="animation-delay:${Math.min(idx*40,200)}ms">
   <div class="row" style="margin-bottom:6px">
     <strong style="color:${name === 'prod' ? '#ff6060' : '#60aaff'}">${name}</strong>
     <span class="badge ${info.running ? 'badge-ok' : 'badge-down'}">${info.running ? 'UP' : 'DOWN'}${isSel ? ' ★' : ''}</span>
@@ -714,7 +714,7 @@ function setBtnLoading(btn, loading) {
   if (loading) {
     btn.disabled = true;
     btn._origHTML = btn.innerHTML;
-    btn.innerHTML = '<span class="spinner"></span>' + btn.textContent.trim();
+    btn.innerHTML = '<span class="spinner"></span>' + btn.innerText.replace(/[^\w\s]/g,'').trim();
     _busyButtons.add(btn.dataset.action);
   } else {
     btn.disabled = false;
@@ -742,7 +742,7 @@ async function doAction(action, target=null, triggerBtn=null) {
   log.textContent += data.output || '';
   log.scrollTop    = log.scrollHeight;
   lsSet(LS_LOG, log.textContent);
-  showToast(`${action} completed on ${target || currentSelected}`, data.ok !== false ? 'success' : 'error');
+  showToast(`${action} completed on ${target || currentSelected}`, data.ok === true ? 'success' : 'error');
   await refreshAll();
 }
 
