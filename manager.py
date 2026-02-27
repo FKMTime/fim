@@ -12,11 +12,11 @@ from urllib.parse import urlparse
 INSTANCES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "instances")
 
 TEMPLATES = {
-    "fkmtest": "/root/fkmtest",
-    "prod":    "/root/prod",
+    "dev": "./templates/dev",
+    "prod":    "./templates/prod",
 }
 
-LOCK_FILE  = "/root/.compose_selected"
+LOCK_FILE  = ".compose_selected"
 PORT_MAIN  = 8181
 PORT_ALT   = 80
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))

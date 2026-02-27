@@ -1,0 +1,138 @@
+ervices:
+  backend:
+    image: "ghcr.io/fkmtime/fkmtime-backend:main"
+    restart: unless-stopped
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+      - 1.1.1.1
+    environment:
+      - DATABASE_URL=postgres://root:password@database:5432/fkm_time
+      - SOCKET_PATH=/app/sock/socket.sock
+      - WCA_CLIENT_ID=example-application-id
+      - WCA_CLIENT_SECRET=example-secret
+      - WCA_LIVE_API_ORIGIN=http://nginx:80/dummy-wca-live/api
+      - WCA_ORIGIN=http://nginx:80/dummy-wca
+    env_file:
+      - .env
+    volumes:
+      - sock:/app/sock
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5000/health || exit 1"]
+      interval: 5s
+      timeout: 20s
+      retries: 50
+    depends_on:
+      database:
+        condition: service_healthy
+  database:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+      - 1.1.1.1
+    environment:
+      - POSTGRES_USER=root
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=fkm_time
+    volumes:
+      - database:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -d postgres"]
+      interval: 5s
+      timeout: 20s
+      retries: 50
+  dummy_wca:
+    restart: unless-stopped
+    image: maxidragon/dummy-wca:main
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+      - 1.1.1.1
+  dummy_wca_live:
+    restart: unless-stopped
+    image: maxidragon/dummy-wca-live:main
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+      - 1.1.1.1
+  nginx:
+    image: "ghcr.io/fkmtime/fkmtime-nginx:main"
+    restart: unless-stopped
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+      - 1.1.1.1
+    environment:
+      - BACKEND_ORIGIN=/api
+      - WCA_CLIENT_ID=example-application-id
+      - WCA_CLIENT_SECRET=example-secret
+      - WCA_LIVE_API_ORIGIN=/dummy-wca-live/api
+      - WCA_ORIGIN=/dummy-wca
+    env_file:
+      - .env
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+  dozzle-init:
+    image: busybox
+    env_file: .env
+    volumes:
+      - ./dozzle:/data
+    command:
+      - sh
+      - -c
+      - |
+        mkdir -p /data
+        printf "users:\n  %s:\n    email: %s\n    password: %s\n" \
+          "$$DOZZLE_USER" "$$DOZZLE_EMAIL" "$$DOZZLE_PASSWORD_HASH" > /data/users.yml
+  dozzle:
+    image: amir20/dozzle:latest
+    restart: unless-stopped
+    depends_on:
+      dozzle-init:
+        condition: service_completed_successfully
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+      - 1.1.1.1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./dozzle:/data
+    ports:
+      - "8080:8080"
+    environment:
+      - DOZZLE_BASE=/logs
+      - DOZZLE_AUTH_PROVIDER=simple
+  micro_connector:
+    image: "ghcr.io/fkmtime/fkmtime-micro-connector:master"
+    network_mode: host
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+      - 1.1.1.1
+    volumes:
+      - /run/dbus:/run/dbus:ro
+      - logs:/logs
+      - sock:/app/sock
+    environment:
+      - PORT=8081
+      - FIRMWARE_DIR=/app/firmware
+      - RUST_LOG=none,backend=debug
+      - DEVICE_LOGS=/logs
+      - SOCKET_PATH=/app/sock/socket.sock
+    env_file:
+      - .env
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+volumes:
+  database:
+  sock:
+  logs:
