@@ -332,12 +332,14 @@ def _do_action_async(action, target):
         cwd = insts[use_name]
         label_map = {
             "pull": f"Pull images for {use_name}",
+            "pull_up": f"Pull images for {use_name}",
             "stop": f"Stop {use_name}",
             "start": f"Start {use_name}",
             "down_volumes": f"Clear data for {use_name}",
         }
         cmd_map = {
             "pull": ["docker", "compose", "pull"],
+            "pull_up": ["docker", "compose", "pull"],
             "stop": ["docker", "compose", "down"],
             "start": ["docker", "compose", "up", "-d"],
             "down_volumes": ["docker", "compose", "down", "--volumes"],
@@ -349,10 +351,30 @@ def _do_action_async(action, target):
             progress_stage(0, "error", "Unknown action")
             progress_done(ok=False)
             return
-        progress_reset([label])
+        # For down_volumes: check if containers were running so we can restart after
+        was_running = False
+        if action == "down_volumes":
+            was_running, _ = compose_status(use_name)
+
+        stages = [label]
+        if action == "down_volumes" and was_running:
+            stages.append(f"Restart {use_name}")
+        if action == "pull_up":
+            stages.append(f"Start {use_name}")
+
+        progress_reset(stages)
         progress_stage(0, "running")
         code, out = run_cmd_live(cmd, cwd=cwd, stage_idx=0)
         progress_stage(0, "done" if code == 0 else "error")
+        if code != 0:
+            progress_done(ok=False)
+            return
+
+        if (action == "down_volumes" and was_running) or action == "pull_up":
+            progress_stage(1, "running")
+            code, out = run_cmd_live(["docker", "compose", "up", "-d"], cwd=cwd, stage_idx=1)
+            progress_stage(1, "done" if code == 0 else "error")
+
         progress_done(ok=code == 0)
 
 def _do_delete_async(name):
@@ -722,6 +744,19 @@ MAIN_HTML = r"""<!DOCTYPE html>
   </div>
 </div>
 
+<!-- Pull modal -->
+<div id="pull-modal-overlay" class="modal-overlay">
+  <div class="modal">
+    <h3 style="color:#60aaff">⬇ Pull Images</h3>
+    <p>Do you want to start containers (<code>docker compose up -d</code>) after pulling?</p>
+    <div class="row">
+      <button class="btn-success" onclick="confirmPull(true)">Pull &amp; Start</button>
+      <button class="btn-neutral" onclick="confirmPull(false)">Pull Only</button>
+      <button class="btn-neutral" onclick="closePullModal()">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <!-- Progress modal overlay -->
 <div id="progress-modal-overlay" class="progress-modal-overlay">
   <div class="progress-modal">
@@ -763,6 +798,12 @@ MAIN_HTML = r"""<!DOCTYPE html>
   <div class="panel" id="tab-wifi">
     <div class="card">
       <h2>WiFi Configuration</h2>
+      <div class="section-title">Current IP Addresses</div>
+      <div style="display:flex;gap:24px;flex-wrap:wrap;margin-bottom:18px;font-size:.88rem">
+        <div><strong>LAN:</strong> <span id="ip-lan" style="color:#888">—</span></div>
+        <div><strong>WAN:</strong> <span id="ip-wan" style="color:#888">—</span></div>
+        <div><strong>WAN WiFi:</strong> <span id="ip-wan-wifi" style="color:#888">—</span></div>
+      </div>
       <p style="font-size:.82rem;color:#666;margin-bottom:16px">Changes apply via <code>uci</code> and will restart the current compose (if running).</p>
       <div class="split">
         <div>
@@ -924,7 +965,7 @@ function renderInstances(instances, selected) {
     } else {
       btns += `<button class="btn-primary" data-action="activate-${name}" onclick="startSwitchTo('${name}',this)">⇄ Activate</button>`;
     }
-    btns += `<button class="btn-neutral" data-action="pull-${name}" onclick="doAction('pull','${name}',this)">⬇ Pull</button>`;
+    btns += `<button class="btn-neutral" data-action="pull-${name}" onclick="showPullModal('${name}')">⬇ Pull</button>`;
     if (isSel) {
       btns += `<button class="btn-warn" title="Clear Data (docker compose down --volumes)" onclick="openModal()">🧹 Clear</button>`;
     }
@@ -1079,6 +1120,9 @@ async function loadWifi() {
   document.getElementById('hs-psk').value   = data.hs_psk   || '';
   document.getElementById('sta-ssid').value = data.sta_ssid || '';
   document.getElementById('sta-psk').value  = data.sta_psk  || '';
+  document.getElementById('ip-lan').textContent     = data.lan_ip      || '—';
+  document.getElementById('ip-wan').textContent     = data.wan_ip      || '—';
+  document.getElementById('ip-wan-wifi').textContent = data.wan_wifi_ip || '—';
   if (data.ok) { msg.textContent = ''; }
   else { msg.textContent = '⚠ uci unavailable'; msg.style.color='#ffaa00'; }
 }
@@ -1116,6 +1160,17 @@ function checkModalInput() {
     document.getElementById('modal-confirm-input').value !== 'DELETE';
 }
 async function confirmDownVolumes() { closeModal(); await doAction('down_volumes'); }
+
+let _pullTarget = null;
+function showPullModal(name) {
+  _pullTarget = name;
+  document.getElementById('pull-modal-overlay').classList.add('show');
+}
+function closePullModal() { document.getElementById('pull-modal-overlay').classList.remove('show'); }
+async function confirmPull(withUp) {
+  closePullModal();
+  await doAction(withUp ? 'pull_up' : 'pull', _pullTarget);
+}
 
 function showCreateModal() {
   document.getElementById('create-name').value = '';
@@ -1261,16 +1316,31 @@ class Handler(BaseHTTPRequestHandler):
             def uci_get(key):
                 code, out = run_cmd(["uci", "get", key], timeout=5)
                 return out.strip() if code == 0 else ""
+            def ifstatus_ip(iface):
+                code, out = run_cmd(["ifstatus", iface], timeout=5)
+                if code != 0:
+                    return ""
+                try:
+                    info = json.loads(out)
+                    addrs = info.get("ipv4-address", [])
+                    return addrs[0]["address"] if addrs else ""
+                except Exception:
+                    return ""
             try:
                 hs_ssid  = uci_get("wireless.default_radio1.ssid")
                 hs_psk   = uci_get("wireless.default_radio1.key")
                 sta_ssid = uci_get("wireless.default_radio0.ssid")
                 sta_psk  = uci_get("wireless.default_radio0.key")
+                lan_ip      = ifstatus_ip("lan")
+                wan_ip      = ifstatus_ip("wan")
+                wan_wifi_ip = ifstatus_ip("wanWIFI")
                 ok = True
             except Exception:
-                hs_ssid = hs_psk = sta_ssid = sta_psk = ""; ok = False
+                hs_ssid = hs_psk = sta_ssid = sta_psk = lan_ip = wan_ip = wan_wifi_ip = ""; ok = False
             self.send_json({"ok": ok, "hs_ssid": hs_ssid, "hs_psk": hs_psk,
-                            "sta_ssid": sta_ssid, "sta_psk": sta_psk})
+                            "sta_ssid": sta_ssid, "sta_psk": sta_psk,
+                            "lan_ip": lan_ip, "wan_ip": wan_ip,
+                            "wan_wifi_ip": wan_wifi_ip})
         elif path == "/api/progress":
             self.send_json(get_progress())
         else:
