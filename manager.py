@@ -833,6 +833,13 @@ function clearOutput() {
   lsSet(LS_LOG, '');
 }
 
+document.addEventListener('click', function(e) {
+  if (_busy) return;
+  if (e.target.closest('#output-panel')) return;
+  const panel = document.getElementById('output-panel');
+  if (panel.classList.contains('show')) panel.classList.remove('show');
+});
+
 // ── localStorage helpers ───────────────────────────────────────────────
 function lsSet(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){} }
 function lsGet(k,d){ try{ const v=localStorage.getItem(k); return v!==null?JSON.parse(v):d; }catch(e){ return d; } }
