@@ -9,18 +9,23 @@ from urllib.parse import urlparse
 
 # ── Config ─────────────────────────────────────────────────────────────────
 
-INSTANCES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "instances")
+SCRIPT_DIR    = os.path.dirname(os.path.abspath(__file__))
+INSTANCES_DIR = os.path.join(SCRIPT_DIR, "instances")
+TEMPLATES_DIR = os.path.join(SCRIPT_DIR, "templates")
+LOCK_FILE     = os.path.join(SCRIPT_DIR, ".compose_selected")
+AUTH_FILE     = os.path.join(SCRIPT_DIR, "auth.json")
+PORT_MAIN     = 8181
+PORT_ALT      = 80
 
-TEMPLATES = {
-    "dev": "./templates/dev",
-    "prod":    "./templates/prod",
-}
-
-LOCK_FILE  = ".compose_selected"
-PORT_MAIN  = 8181
-PORT_ALT   = 80
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-AUTH_FILE  = os.path.join(SCRIPT_DIR, "auth.json")
+def get_templates():
+    """Scan templates directory and return {name: path} for each subdirectory."""
+    templates = {}
+    if os.path.isdir(TEMPLATES_DIR):
+        for name in sorted(os.listdir(TEMPLATES_DIR)):
+            p = os.path.join(TEMPLATES_DIR, name)
+            if os.path.isdir(p):
+                templates[name] = p
+    return templates
 
 # ── Global instances cache ──────────────────────────────────────────────────
 
@@ -241,7 +246,7 @@ def create_instance(name, template_key):
     insts = get_instances()
     if name in insts:
         return False, "Instance already exists"
-    src = TEMPLATES.get(template_key)
+    src = get_templates().get(template_key)
     if not src or not os.path.isdir(src):
         return False, f"Template '{template_key}' not found or is not a directory"
     dst = os.path.join(INSTANCES_DIR, name)
@@ -714,8 +719,6 @@ MAIN_HTML = r"""<!DOCTYPE html>
     <div class="modal-input-wrap">
       <label>Template</label>
       <select id="create-template">
-        <option value="fkmtest">fkmtest</option>
-        <option value="prod">prod</option>
       </select>
     </div>
     <div class="modal-input-wrap">
@@ -1172,9 +1175,26 @@ async function confirmPull(withUp) {
   await doAction(withUp ? 'pull_up' : 'pull', _pullTarget);
 }
 
-function showCreateModal() {
+async function showCreateModal() {
   document.getElementById('create-name').value = '';
   document.getElementById('create-ok-btn').disabled = true;
+  const sel = document.getElementById('create-template');
+  sel.innerHTML = '<option disabled selected>Loading…</option>';
+  try {
+    const data = await api('/api/templates');
+    sel.innerHTML = '';
+    if (data && data.templates && data.templates.length) {
+      data.templates.forEach(t => {
+        const opt = document.createElement('option');
+        opt.value = t; opt.textContent = t;
+        sel.appendChild(opt);
+      });
+    } else {
+      sel.innerHTML = '<option disabled selected>No templates found</option>';
+    }
+  } catch(e) {
+    sel.innerHTML = '<option disabled selected>Failed to load templates</option>';
+  }
   document.getElementById('create-modal-overlay').classList.add('show');
 }
 function closeCreateModal() { document.getElementById('create-modal-overlay').classList.remove('show'); }
@@ -1343,6 +1363,8 @@ class Handler(BaseHTTPRequestHandler):
                             "wan_wifi_ip": wan_wifi_ip})
         elif path == "/api/progress":
             self.send_json(get_progress())
+        elif path == "/api/templates":
+            self.send_json({"templates": list(get_templates().keys())})
         else:
             self.send_response(404); self.end_headers()
 
@@ -1466,7 +1488,7 @@ if __name__ == "__main__":
     threading.Thread(target=main_server.serve_forever, daemon=True).start()
     print(f"FKM Instance Manager running on http://0.0.0.0:{PORT_MAIN}")
     print(f"Instances directory: {INSTANCES_DIR}")
-    print(f"Templates: {list(TEMPLATES.keys())}")
+    print(f"Templates: {list(get_templates().keys())}")
     print(f"Selected instance: {get_selected() or 'none'}")
 
     threading.Thread(target=_port80_monitor, daemon=True).start()
