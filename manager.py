@@ -12,7 +12,7 @@ from urllib.parse import urlparse, parse_qs
 SCRIPT_DIR    = os.path.dirname(os.path.abspath(__file__))
 INSTANCES_DIR = os.path.join(SCRIPT_DIR, "instances")
 TEMPLATES_DIR = os.path.join(SCRIPT_DIR, "templates")
-LOCK_FILE     = os.path.join(SCRIPT_DIR, ".compose_selected")
+LOCK_FILE     = os.path.join(SCRIPT_DIR, ".instance_selected")
 AUTH_FILE     = os.path.join(SCRIPT_DIR, "auth.json")
 PORT_MAIN     = 8181
 PORT_ALT      = 80
