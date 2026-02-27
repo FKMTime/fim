@@ -2,10 +2,10 @@
 
 """FKM Instance Manager - Port 8181 (+ dynamic port 80) - DYNAMIC INSTANCES"""
 
-import os, json, subprocess, threading, hashlib, secrets, time, shutil
+import os, json, subprocess, threading, hashlib, secrets, time, shutil, tarfile
 
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 
 # ── Config ─────────────────────────────────────────────────────────────────
 
@@ -538,6 +538,65 @@ def _do_compose_restart_async(name):
         progress_stage(1, "done" if code == 0 else "error")
         progress_done(ok=code == 0)
 
+# ── Backup state ────────────────────────────────────────────────────────────
+
+_backup_lock  = threading.Lock()
+_backup_ready = {}  # name -> tar_path
+
+def _do_backup_async(name):
+    with _action_lock:
+        insts = get_instances()
+        if name not in insts:
+            progress_reset([f"Backup {name}"])
+            progress_stage(0, "error", "Instance not found")
+            progress_done(ok=False)
+            return
+        cwd = insts[name]
+        running, _ = compose_status(name)
+
+        stages = []
+        if running:
+            stages.append(f"Stop {name}")
+        stages.append(f"Create archive for {name}")
+        if running:
+            stages.append(f"Restart {name}")
+        progress_reset(stages)
+
+        si = 0
+        if running:
+            progress_stage(si, "running")
+            progress_stage(si, "running", f"$ docker compose down ({name})")
+            code, out = run_cmd_live(["docker", "compose", "down"], cwd=cwd, stage_idx=si)
+            progress_stage(si, "done" if code == 0 else "error")
+            if code != 0:
+                progress_done(ok=False)
+                return
+            si += 1
+
+        progress_stage(si, "running")
+        safe_name = os.path.basename(name)
+        tar_path = os.path.join(SCRIPT_DIR, f"{safe_name}.tar.gz")
+        try:
+            progress_stage(si, "running", f"Creating {name}.tar.gz …")
+            with tarfile.open(tar_path, "w:gz") as tar:
+                tar.add(cwd, arcname=name)
+            progress_stage(si, "done", f"Archive ready: {name}.tar.gz")
+            with _backup_lock:
+                _backup_ready[name] = tar_path
+        except Exception as e:
+            progress_stage(si, "error", str(e))
+            progress_done(ok=False)
+            return
+        si += 1
+
+        if running:
+            progress_stage(si, "running")
+            progress_stage(si, "running", f"$ docker compose up -d ({name})")
+            code, out = run_cmd_live(["docker", "compose", "up", "-d"], cwd=cwd, stage_idx=si)
+            progress_stage(si, "done" if code == 0 else "error")
+
+        progress_done(ok=True)
+
 # ── Dynamic port 80 manager ─────────────────────────────────────────────────
 
 _port80_server   = None
@@ -813,6 +872,18 @@ MAIN_HTML = r"""<!DOCTYPE html>
   </div>
 </div>
 
+<!-- Backup confirm modal -->
+<div id="backup-modal-overlay" class="modal-overlay">
+  <div class="modal">
+    <h3 style="color:#60aaff">📦 Backup Instance <span id="backup-instance-name" style="color:#60aaff"></span></h3>
+    <p>This will create a <code>.tar.gz</code> archive of the entire instance directory and download it.<br><br>If the instance is running, it will be <strong>stopped</strong> during the backup and then <strong>restarted</strong> automatically.</p>
+    <div class="row">
+      <button class="btn-primary" onclick="confirmBackup()">Backup &amp; Download</button>
+      <button class="btn-neutral" onclick="closeBackupModal()">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <!-- Progress modal overlay -->
 <div id="progress-modal-overlay" class="progress-modal-overlay">
   <div class="progress-modal">
@@ -1039,6 +1110,7 @@ function renderInstances(instances, selected) {
     if (isSel) {
       btns += `<button class="btn-warn" title="Clear Data (docker compose down --volumes)" onclick="openModal()">🧹 Clear</button>`;
     }
+    btns += `<button class="btn-neutral" onclick="showBackupModal('${name}')" title="Backup & Download">📦</button>`;
     btns += `<button class="btn-danger" onclick="showDeleteModal('${name}')">🗑</button>`;
 
     html += `
@@ -1343,6 +1415,42 @@ async function deleteInstance(name) {
   startProgressPolling();
 }
 
+let _backupTarget = null;
+function showBackupModal(name) {
+  _backupTarget = name;
+  document.getElementById('backup-instance-name').textContent = name;
+  document.getElementById('backup-modal-overlay').classList.add('show');
+}
+function closeBackupModal() { document.getElementById('backup-modal-overlay').classList.remove('show'); }
+async function confirmBackup() {
+  closeBackupModal();
+  if (_busy || !_backupTarget) return;
+  const name = _backupTarget;
+  const data = await api('/api/instance/backup', {name});
+  if (!data || !data.ok) {
+    showToast('Backup failed: ' + (data?.error || 'Unknown error'), 'error');
+    return;
+  }
+  startProgressPolling();
+  // Poll for completion and trigger download
+  const dlPoll = setInterval(async () => {
+    let pg;
+    try { pg = await api('/api/progress'); } catch(e) { return; }
+    if (!pg || !pg.done) return;
+    clearInterval(dlPoll);
+    if (pg.ok) {
+      // Trigger download via hidden link
+      const a = document.createElement('a');
+      a.href = '/api/instance/backup/download?name=' + encodeURIComponent(name);
+      a.download = name + '.tar.gz';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      showToast('Backup download started', 'success');
+    }
+  }, 800);
+}
+
 // ── Boot: restore saved state then fetch live data ─────────────────────
 (async () => {
   // Restore saved tab
@@ -1468,6 +1576,31 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(get_progress())
         elif path == "/api/templates":
             self.send_json({"templates": list(get_templates().keys())})
+        elif path == "/api/instance/backup/download":
+            qs = parse_qs(urlparse(self.path).query)
+            name = qs.get("name", [""])[0]
+            with _backup_lock:
+                tar_path = _backup_ready.get(name)
+            if not tar_path or not os.path.isfile(tar_path):
+                self.send_json({"ok": False, "error": "No backup ready"}, code=404)
+                return
+            with _backup_lock:
+                _backup_ready.pop(name, None)
+            try:
+                fsize = os.path.getsize(tar_path)
+                self.send_response(200)
+                self.send_header("Content-Type", "application/gzip")
+                safe_fname = os.path.basename(name).replace('"', '_')
+                self.send_header("Content-Disposition", f'attachment; filename="{safe_fname}.tar.gz"')
+                self.send_header("Content-Length", str(fsize))
+                self.end_headers()
+                with open(tar_path, "rb") as f:
+                    shutil.copyfileobj(f, self.wfile)
+            finally:
+                try:
+                    os.unlink(tar_path)
+                except Exception:
+                    pass
         else:
             self.send_response(404); self.end_headers()
 
@@ -1572,6 +1705,17 @@ class Handler(BaseHTTPRequestHandler):
                 return
             _action_lock.release()
             threading.Thread(target=_do_delete_async, args=(name,), daemon=True).start()
+            self.send_json({"ok": True})
+        elif path == "/api/instance/backup":
+            name = body.get("name", "").strip()
+            if not name or name not in get_instances():
+                self.send_json({"ok": False, "error": "Instance not found"})
+                return
+            if not _action_lock.acquire(blocking=False):
+                self.send_json({"ok": False, "error": "Action already running"})
+                return
+            _action_lock.release()
+            threading.Thread(target=_do_backup_async, args=(name,), daemon=True).start()
             self.send_json({"ok": True})
         elif path == "/api/wifi":
             hs_ssid  = body.get("hs_ssid", "")
