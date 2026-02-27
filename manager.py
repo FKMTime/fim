@@ -332,12 +332,14 @@ def _do_action_async(action, target):
         cwd = insts[use_name]
         label_map = {
             "pull": f"Pull images for {use_name}",
+            "pull_up": f"Pull images for {use_name}",
             "stop": f"Stop {use_name}",
             "start": f"Start {use_name}",
             "down_volumes": f"Clear data for {use_name}",
         }
         cmd_map = {
             "pull": ["docker", "compose", "pull"],
+            "pull_up": ["docker", "compose", "pull"],
             "stop": ["docker", "compose", "down"],
             "start": ["docker", "compose", "up", "-d"],
             "down_volumes": ["docker", "compose", "down", "--volumes"],
@@ -357,6 +359,8 @@ def _do_action_async(action, target):
         stages = [label]
         if action == "down_volumes" and was_running:
             stages.append(f"Restart {use_name}")
+        if action == "pull_up":
+            stages.append(f"Start {use_name}")
 
         progress_reset(stages)
         progress_stage(0, "running")
@@ -366,7 +370,7 @@ def _do_action_async(action, target):
             progress_done(ok=False)
             return
 
-        if action == "down_volumes" and was_running:
+        if (action == "down_volumes" and was_running) or action == "pull_up":
             progress_stage(1, "running")
             code, out = run_cmd_live(["docker", "compose", "up", "-d"], cwd=cwd, stage_idx=1)
             progress_stage(1, "done" if code == 0 else "error")
@@ -740,6 +744,19 @@ MAIN_HTML = r"""<!DOCTYPE html>
   </div>
 </div>
 
+<!-- Pull modal -->
+<div id="pull-modal-overlay" class="modal-overlay">
+  <div class="modal">
+    <h3 style="color:#60aaff">⬇ Pull Images</h3>
+    <p>Do you want to start containers (<code>docker compose up -d</code>) after pulling?</p>
+    <div class="row">
+      <button class="btn-success" onclick="confirmPull(true)">Pull &amp; Start</button>
+      <button class="btn-neutral" onclick="confirmPull(false)">Pull Only</button>
+      <button class="btn-neutral" onclick="closePullModal()">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <!-- Progress modal overlay -->
 <div id="progress-modal-overlay" class="progress-modal-overlay">
   <div class="progress-modal">
@@ -948,7 +965,7 @@ function renderInstances(instances, selected) {
     } else {
       btns += `<button class="btn-primary" data-action="activate-${name}" onclick="startSwitchTo('${name}',this)">⇄ Activate</button>`;
     }
-    btns += `<button class="btn-neutral" data-action="pull-${name}" onclick="doAction('pull','${name}',this)">⬇ Pull</button>`;
+    btns += `<button class="btn-neutral" data-action="pull-${name}" onclick="showPullModal('${name}')">⬇ Pull</button>`;
     if (isSel) {
       btns += `<button class="btn-warn" title="Clear Data (docker compose down --volumes)" onclick="openModal()">🧹 Clear</button>`;
     }
@@ -1143,6 +1160,17 @@ function checkModalInput() {
     document.getElementById('modal-confirm-input').value !== 'DELETE';
 }
 async function confirmDownVolumes() { closeModal(); await doAction('down_volumes'); }
+
+let _pullTarget = null;
+function showPullModal(name) {
+  _pullTarget = name;
+  document.getElementById('pull-modal-overlay').classList.add('show');
+}
+function closePullModal() { document.getElementById('pull-modal-overlay').classList.remove('show'); }
+async function confirmPull(withUp) {
+  closePullModal();
+  await doAction(withUp ? 'pull_up' : 'pull', _pullTarget);
+}
 
 function showCreateModal() {
   document.getElementById('create-name').value = '';
