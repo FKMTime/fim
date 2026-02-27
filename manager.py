@@ -2,25 +2,30 @@
 
 """FKM Instance Manager - Port 8181 (+ dynamic port 80) - DYNAMIC INSTANCES"""
 
-import os, json, subprocess, threading, hashlib, secrets, time, shutil
+import os, json, subprocess, threading, hashlib, secrets, time, shutil, tarfile
 
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 
 # ── Config ─────────────────────────────────────────────────────────────────
 
-INSTANCES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "instances")
+SCRIPT_DIR    = os.path.dirname(os.path.abspath(__file__))
+INSTANCES_DIR = os.path.join(SCRIPT_DIR, "instances")
+TEMPLATES_DIR = os.path.join(SCRIPT_DIR, "templates")
+LOCK_FILE     = os.path.join(SCRIPT_DIR, ".compose_selected")
+AUTH_FILE     = os.path.join(SCRIPT_DIR, "auth.json")
+PORT_MAIN     = 8181
+PORT_ALT      = 80
 
-TEMPLATES = {
-    "dev": "./templates/dev",
-    "prod":    "./templates/prod",
-}
-
-LOCK_FILE  = ".compose_selected"
-PORT_MAIN  = 8181
-PORT_ALT   = 80
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-AUTH_FILE  = os.path.join(SCRIPT_DIR, "auth.json")
+def get_templates():
+    """Scan templates directory and return {name: path} for each subdirectory."""
+    templates = {}
+    if os.path.isdir(TEMPLATES_DIR):
+        for name in sorted(os.listdir(TEMPLATES_DIR)):
+            p = os.path.join(TEMPLATES_DIR, name)
+            if os.path.isdir(p):
+                templates[name] = p
+    return templates
 
 # ── Global instances cache ──────────────────────────────────────────────────
 
@@ -232,6 +237,23 @@ def write_env(name, content):
     with open(os.path.join(insts[name], ".env"), "w") as f:
         f.write(content)
 
+def read_compose(name):
+    insts = get_instances()
+    if name not in insts:
+        return ""
+    try:
+        with open(os.path.join(insts[name], "docker-compose.yml")) as f:
+            return f.read()
+    except FileNotFoundError:
+        return ""
+
+def write_compose(name, content):
+    insts = get_instances()
+    if name not in insts:
+        raise FileNotFoundError("Instance not found")
+    with open(os.path.join(insts[name], "docker-compose.yml"), "w") as f:
+        f.write(content)
+
 # ── Instance management ─────────────────────────────────────────────────────
 
 def create_instance(name, template_key):
@@ -241,7 +263,7 @@ def create_instance(name, template_key):
     insts = get_instances()
     if name in insts:
         return False, "Instance already exists"
-    src = TEMPLATES.get(template_key)
+    src = get_templates().get(template_key)
     if not src or not os.path.isdir(src):
         return False, f"Template '{template_key}' not found or is not a directory"
     dst = os.path.join(INSTANCES_DIR, name)
@@ -492,6 +514,89 @@ def _do_env_restart_async(name):
         progress_stage(0, "done" if code == 0 else "error")
         progress_done(ok=code == 0)
 
+def _do_compose_restart_async(name):
+    """Down then up compose after docker-compose.yml change."""
+    with _action_lock:
+        insts = get_instances()
+        if name not in insts:
+            progress_reset([f"Restart {name}"])
+            progress_stage(0, "error", "Instance not found")
+            progress_done(ok=False)
+            return
+        cwd = insts[name]
+        progress_reset([f"Stop {name}", f"Start {name}"])
+        progress_stage(0, "running")
+        progress_stage(0, "running", f"$ docker compose down ({name})")
+        code, out = run_cmd_live(["docker", "compose", "down"], cwd=cwd, stage_idx=0)
+        progress_stage(0, "done" if code == 0 else "error")
+        if code != 0:
+            progress_done(ok=False)
+            return
+        progress_stage(1, "running")
+        progress_stage(1, "running", f"$ docker compose up -d ({name})")
+        code, out = run_cmd_live(["docker", "compose", "up", "-d"], cwd=cwd, stage_idx=1)
+        progress_stage(1, "done" if code == 0 else "error")
+        progress_done(ok=code == 0)
+
+# ── Backup state ────────────────────────────────────────────────────────────
+
+_backup_lock  = threading.Lock()
+_backup_ready = {}  # name -> tar_path
+
+def _do_backup_async(name):
+    with _action_lock:
+        insts = get_instances()
+        if name not in insts:
+            progress_reset([f"Backup {name}"])
+            progress_stage(0, "error", "Instance not found")
+            progress_done(ok=False)
+            return
+        cwd = insts[name]
+        running, _ = compose_status(name)
+
+        stages = []
+        if running:
+            stages.append(f"Stop {name}")
+        stages.append(f"Create archive for {name}")
+        if running:
+            stages.append(f"Restart {name}")
+        progress_reset(stages)
+
+        si = 0
+        if running:
+            progress_stage(si, "running")
+            progress_stage(si, "running", f"$ docker compose down ({name})")
+            code, out = run_cmd_live(["docker", "compose", "down"], cwd=cwd, stage_idx=si)
+            progress_stage(si, "done" if code == 0 else "error")
+            if code != 0:
+                progress_done(ok=False)
+                return
+            si += 1
+
+        progress_stage(si, "running")
+        safe_name = os.path.basename(name)
+        tar_path = os.path.join(SCRIPT_DIR, f"{safe_name}.tar.gz")
+        try:
+            progress_stage(si, "running", f"Creating {name}.tar.gz …")
+            with tarfile.open(tar_path, "w:gz") as tar:
+                tar.add(cwd, arcname=name)
+            progress_stage(si, "done", f"Archive ready: {name}.tar.gz")
+            with _backup_lock:
+                _backup_ready[name] = tar_path
+        except Exception as e:
+            progress_stage(si, "error", str(e))
+            progress_done(ok=False)
+            return
+        si += 1
+
+        if running:
+            progress_stage(si, "running")
+            progress_stage(si, "running", f"$ docker compose up -d ({name})")
+            code, out = run_cmd_live(["docker", "compose", "up", "-d"], cwd=cwd, stage_idx=si)
+            progress_stage(si, "done" if code == 0 else "error")
+
+        progress_done(ok=True)
+
 # ── Dynamic port 80 manager ─────────────────────────────────────────────────
 
 _port80_server   = None
@@ -714,8 +819,6 @@ MAIN_HTML = r"""<!DOCTYPE html>
     <div class="modal-input-wrap">
       <label>Template</label>
       <select id="create-template">
-        <option value="fkmtest">fkmtest</option>
-        <option value="prod">prod</option>
       </select>
     </div>
     <div class="modal-input-wrap">
@@ -757,6 +860,30 @@ MAIN_HTML = r"""<!DOCTYPE html>
   </div>
 </div>
 
+<!-- Compose save confirm modal -->
+<div id="compose-save-modal-overlay" class="modal-overlay">
+  <div class="modal">
+    <h3 style="color:#ffaa60">📝 Save docker-compose.yml?</h3>
+    <p>This will overwrite the current <code>docker-compose.yml</code>.<br><br>If the instance is running, it will be stopped and restarted to apply the changes.</p>
+    <div class="row">
+      <button class="btn-success" onclick="confirmComposeSave()">Save &amp; Apply</button>
+      <button class="btn-neutral" onclick="closeComposeSaveModal()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Backup confirm modal -->
+<div id="backup-modal-overlay" class="modal-overlay">
+  <div class="modal">
+    <h3 style="color:#60aaff">📦 Backup Instance <span id="backup-instance-name" style="color:#60aaff"></span></h3>
+    <p>This will create a <code>.tar.gz</code> archive of the entire instance directory and download it.<br><br>If the instance is running, it will be <strong>stopped</strong> during the backup and then <strong>restarted</strong> automatically.</p>
+    <div class="row">
+      <button class="btn-primary" onclick="confirmBackup()">Backup &amp; Download</button>
+      <button class="btn-neutral" onclick="closeBackupModal()">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <!-- Progress modal overlay -->
 <div id="progress-modal-overlay" class="progress-modal-overlay">
   <div class="progress-modal">
@@ -770,6 +897,7 @@ MAIN_HTML = r"""<!DOCTYPE html>
   <div class="tabs">
     <div class="tab active" onclick="switchTab('control')">Control</div>
     <div class="tab" onclick="switchTab('env')">Env Editor</div>
+    <div class="tab" onclick="switchTab('compose')">Compose</div>
     <div class="tab" onclick="switchTab('wifi')">WiFi</div>
   </div>
   <div class="panel active" id="tab-control">
@@ -792,6 +920,18 @@ MAIN_HTML = r"""<!DOCTYPE html>
         <button class="btn-success" onclick="saveEnv()">💾 Save .env</button>
         <button class="btn-neutral" onclick="loadEnv()">↻ Reload</button>
         <span id="env-save-msg" style="font-size:.82rem"></span>
+      </div>
+    </div>
+  </div>
+  <div class="panel" id="tab-compose">
+    <div class="card">
+      <h2>Compose Editor — <span id="compose-instance-label" style="color:#888">…</span></h2>
+      <div class="section-title">docker-compose.yml</div>
+      <textarea id="compose-content" rows="20" placeholder="# docker-compose.yml is empty or missing"></textarea>
+      <div class="row" style="margin-top:10px">
+        <button class="btn-success" onclick="showComposeSaveModal()">💾 Save docker-compose.yml</button>
+        <button class="btn-neutral" onclick="loadCompose()">↻ Reload</button>
+        <span id="compose-save-msg" style="font-size:.82rem"></span>
       </div>
     </div>
   </div>
@@ -900,14 +1040,15 @@ function showToast(msg, type='info') {
 
 // ── Tab switching with persistence ─────────────────────────────────────
 function switchTab(name) {
-  ['control','env','wifi'].forEach((n,i) => {
+  ['control','env','compose','wifi'].forEach((n,i) => {
     document.querySelectorAll('.tab')[i].classList.toggle('active', n===name);
     const panel = document.querySelectorAll('.panel')[i];
     panel.classList.toggle('active', n===name);
   });
   lsSet(LS_TAB, name);
-  if (name==='env')  loadEnv();
-  if (name==='wifi') loadWifi();
+  if (name==='env')     loadEnv();
+  if (name==='compose') loadCompose();
+  if (name==='wifi')    loadWifi();
 }
 
 async function api(path, body=null) {
@@ -969,6 +1110,7 @@ function renderInstances(instances, selected) {
     if (isSel) {
       btns += `<button class="btn-warn" title="Clear Data (docker compose down --volumes)" onclick="openModal()">🧹 Clear</button>`;
     }
+    btns += `<button class="btn-neutral" onclick="showBackupModal('${name}')" title="Backup & Download">📦</button>`;
     btns += `<button class="btn-danger" onclick="showDeleteModal('${name}')">🗑</button>`;
 
     html += `
@@ -1110,6 +1252,38 @@ async function saveEnv() {
   }
 }
 
+// Compose
+async function loadCompose() {
+  const data = await api('/api/compose');
+  if (!data) return;
+  document.getElementById('compose-content').value = data.content || '';
+  document.getElementById('compose-instance-label').textContent = data.selected || 'none';
+  document.getElementById('compose-save-msg').textContent = '';
+}
+
+function showComposeSaveModal() {
+  document.getElementById('compose-save-modal-overlay').classList.add('show');
+}
+function closeComposeSaveModal() {
+  document.getElementById('compose-save-modal-overlay').classList.remove('show');
+}
+
+async function confirmComposeSave() {
+  closeComposeSaveModal();
+  const content = document.getElementById('compose-content').value;
+  const data = await api('/api/compose/save', {content});
+  if (!data) return;
+  const msg = document.getElementById('compose-save-msg');
+  msg.textContent = data.ok ? '✓ Saved' : ('✗ ' + data.error);
+  msg.style.color = data.ok ? '#60ff90' : '#ff6060';
+  if (data.ok && data.restarting) {
+    showToast('Saved — restarting compose to apply changes…', 'info');
+    startProgressPolling();
+  } else {
+    showToast(data.ok ? 'Compose file saved' : 'Failed to save', data.ok ? 'success' : 'error');
+  }
+}
+
 // WiFi
 async function loadWifi() {
   const msg = document.getElementById('wifi-msg');
@@ -1172,9 +1346,26 @@ async function confirmPull(withUp) {
   await doAction(withUp ? 'pull_up' : 'pull', _pullTarget);
 }
 
-function showCreateModal() {
+async function showCreateModal() {
   document.getElementById('create-name').value = '';
   document.getElementById('create-ok-btn').disabled = true;
+  const sel = document.getElementById('create-template');
+  sel.innerHTML = '<option disabled selected>Loading…</option>';
+  try {
+    const data = await api('/api/templates');
+    sel.innerHTML = '';
+    if (data && data.templates && data.templates.length) {
+      data.templates.forEach(t => {
+        const opt = document.createElement('option');
+        opt.value = t; opt.textContent = t;
+        sel.appendChild(opt);
+      });
+    } else {
+      sel.innerHTML = '<option disabled selected>No templates found</option>';
+    }
+  } catch(e) {
+    sel.innerHTML = '<option disabled selected>Failed to load templates</option>';
+  }
   document.getElementById('create-modal-overlay').classList.add('show');
 }
 function closeCreateModal() { document.getElementById('create-modal-overlay').classList.remove('show'); }
@@ -1222,6 +1413,42 @@ async function deleteInstance(name) {
     return;
   }
   startProgressPolling();
+}
+
+let _backupTarget = null;
+function showBackupModal(name) {
+  _backupTarget = name;
+  document.getElementById('backup-instance-name').textContent = name;
+  document.getElementById('backup-modal-overlay').classList.add('show');
+}
+function closeBackupModal() { document.getElementById('backup-modal-overlay').classList.remove('show'); }
+async function confirmBackup() {
+  closeBackupModal();
+  if (_busy || !_backupTarget) return;
+  const name = _backupTarget;
+  const data = await api('/api/instance/backup', {name});
+  if (!data || !data.ok) {
+    showToast('Backup failed: ' + (data?.error || 'Unknown error'), 'error');
+    return;
+  }
+  startProgressPolling();
+  // Poll for completion and trigger download
+  const dlPoll = setInterval(async () => {
+    let pg;
+    try { pg = await api('/api/progress'); } catch(e) { return; }
+    if (!pg || !pg.done) return;
+    clearInterval(dlPoll);
+    if (pg.ok) {
+      // Trigger download via hidden link
+      const a = document.createElement('a');
+      a.href = '/api/instance/backup/download?name=' + encodeURIComponent(name);
+      a.download = name + '.tar.gz';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      showToast('Backup download started', 'success');
+    }
+  }, 800);
 }
 
 // ── Boot: restore saved state then fetch live data ─────────────────────
@@ -1312,6 +1539,10 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"selected": selected,
                             "template": read_template(selected),
                             "content":  read_env(selected)})
+        elif path == "/api/compose":
+            selected = get_selected()
+            self.send_json({"selected": selected,
+                            "content":  read_compose(selected)})
         elif path == "/api/wifi/current":
             def uci_get(key):
                 code, out = run_cmd(["uci", "get", key], timeout=5)
@@ -1343,6 +1574,33 @@ class Handler(BaseHTTPRequestHandler):
                             "wan_wifi_ip": wan_wifi_ip})
         elif path == "/api/progress":
             self.send_json(get_progress())
+        elif path == "/api/templates":
+            self.send_json({"templates": list(get_templates().keys())})
+        elif path == "/api/instance/backup/download":
+            qs = parse_qs(urlparse(self.path).query)
+            name = qs.get("name", [""])[0]
+            with _backup_lock:
+                tar_path = _backup_ready.get(name)
+            if not tar_path or not os.path.isfile(tar_path):
+                self.send_json({"ok": False, "error": "No backup ready"}, code=404)
+                return
+            with _backup_lock:
+                _backup_ready.pop(name, None)
+            try:
+                fsize = os.path.getsize(tar_path)
+                self.send_response(200)
+                self.send_header("Content-Type", "application/gzip")
+                safe_fname = os.path.basename(name).replace('"', '_')
+                self.send_header("Content-Disposition", f'attachment; filename="{safe_fname}.tar.gz"')
+                self.send_header("Content-Length", str(fsize))
+                self.end_headers()
+                with open(tar_path, "rb") as f:
+                    shutil.copyfileobj(f, self.wfile)
+            finally:
+                try:
+                    os.unlink(tar_path)
+                except Exception:
+                    pass
         else:
             self.send_response(404); self.end_headers()
 
@@ -1418,6 +1676,20 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"ok": True, "restarting": restarting})
             except Exception as e:
                 self.send_json({"ok": False, "error": str(e)})
+        elif path == "/api/compose/save":
+            selected = get_selected()
+            try:
+                write_compose(selected, body.get("content", ""))
+                restarting = False
+                if selected:
+                    running, _ = compose_status(selected)
+                    if running and _action_lock.acquire(blocking=False):
+                        _action_lock.release()
+                        threading.Thread(target=_do_compose_restart_async, args=(selected,), daemon=True).start()
+                        restarting = True
+                self.send_json({"ok": True, "restarting": restarting})
+            except Exception as e:
+                self.send_json({"ok": False, "error": str(e)})
         elif path == "/api/instance/create":
             name = body.get("name", "").strip()
             templ = body.get("template", "")
@@ -1433,6 +1705,17 @@ class Handler(BaseHTTPRequestHandler):
                 return
             _action_lock.release()
             threading.Thread(target=_do_delete_async, args=(name,), daemon=True).start()
+            self.send_json({"ok": True})
+        elif path == "/api/instance/backup":
+            name = body.get("name", "").strip()
+            if not name or name not in get_instances():
+                self.send_json({"ok": False, "error": "Instance not found"})
+                return
+            if not _action_lock.acquire(blocking=False):
+                self.send_json({"ok": False, "error": "Action already running"})
+                return
+            _action_lock.release()
+            threading.Thread(target=_do_backup_async, args=(name,), daemon=True).start()
             self.send_json({"ok": True})
         elif path == "/api/wifi":
             hs_ssid  = body.get("hs_ssid", "")
@@ -1466,7 +1749,7 @@ if __name__ == "__main__":
     threading.Thread(target=main_server.serve_forever, daemon=True).start()
     print(f"FKM Instance Manager running on http://0.0.0.0:{PORT_MAIN}")
     print(f"Instances directory: {INSTANCES_DIR}")
-    print(f"Templates: {list(TEMPLATES.keys())}")
+    print(f"Templates: {list(get_templates().keys())}")
     print(f"Selected instance: {get_selected() or 'none'}")
 
     threading.Thread(target=_port80_monitor, daemon=True).start()
