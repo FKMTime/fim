@@ -455,7 +455,7 @@ def _do_wifi_async(hs_ssid, hs_psk, sta_ssid, sta_psk):
         progress_done(ok=True)
 
 def _do_env_restart_async(name):
-    """Restart compose after .env change using 'docker compose restart' to force containers to reload environment variables."""
+    """Restart compose after .env change using 'docker compose up -d' to pick up new env."""
     with _action_lock:
         insts = get_instances()
         if name not in insts:
@@ -465,8 +465,8 @@ def _do_env_restart_async(name):
             return
         progress_reset([f"Apply .env changes to {name}"])
         progress_stage(0, "running")
-        progress_stage(0, "running", f"$ docker compose restart ({name})")
-        code, out = run_cmd_live(["docker", "compose", "restart"], cwd=insts[name], stage_idx=0)
+        progress_stage(0, "running", f"$ docker compose up -d ({name})")
+        code, out = run_cmd_live(["docker", "compose", "up", "-d"], cwd=insts[name], stage_idx=0)
         progress_stage(0, "done" if code == 0 else "error")
         progress_done(ok=code == 0)
 
