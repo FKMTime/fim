@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-"""FKM Instance Manager - Port 8181 (+ dynamic port 80) - DYNAMIC INSTANCES"""
+"""FKMTime Instance Manager - Port 8181 (+ dynamic port 80) - DYNAMIC INSTANCES"""
 
 import os, json, subprocess, threading, hashlib, secrets, time, shutil, tarfile
 
@@ -269,6 +269,9 @@ def create_instance(name, template_key):
     dst = os.path.join(INSTANCES_DIR, name)
     try:
         shutil.copytree(src, dst)
+        # Store which template was used
+        with open(os.path.join(dst, ".fkm_template"), "w") as f:
+            f.write(template_key)
         env_template = os.path.join(dst, ".env.template")
         env_file = os.path.join(dst, ".env")
         if os.path.isfile(env_template) and not os.path.isfile(env_file):
@@ -279,6 +282,36 @@ def create_instance(name, template_key):
         return True, None
     except Exception as e:
         return False, str(e)
+
+def get_instance_template_path(name):
+    """Return the template directory path for an instance, or None."""
+    insts = get_instances()
+    if name not in insts:
+        return None
+    tmpl_file = os.path.join(insts[name], ".fkm_template")
+    if os.path.isfile(tmpl_file):
+        try:
+            with open(tmpl_file) as f:
+                tmpl_key = f.read().strip()
+            tmpl_path = get_templates().get(tmpl_key)
+            if tmpl_path and os.path.isdir(tmpl_path):
+                return tmpl_path
+        except Exception:
+            pass
+    return None
+
+def purge_extra_dirs(instance_path, template_path):
+    """Delete directories in instance that don't exist in the template. Returns list of removed dirs."""
+    template_entries = set(os.listdir(template_path))
+    removed = []
+    for entry in os.listdir(instance_path):
+        entry_path = os.path.join(instance_path, entry)
+        if os.path.islink(entry_path):
+            continue
+        if os.path.isdir(entry_path) and entry not in template_entries:
+            shutil.rmtree(entry_path)
+            removed.append(entry)
+    return removed
 
 def delete_instance(name):
     name = name.strip()
@@ -379,10 +412,14 @@ def _do_action_async(action, target):
             return
         # For down_volumes: check if containers were running so we can restart after
         was_running = False
+        tmpl_path = None
         if action == "down_volumes":
             was_running, _ = compose_status(use_name)
+            tmpl_path = get_instance_template_path(use_name)
 
         stages = [label]
+        if action == "down_volumes" and tmpl_path:
+            stages.append(f"Purge extra dirs for {use_name}")
         if action == "down_volumes" and was_running:
             stages.append(f"Restart {use_name}")
         if action == "pull_up":
@@ -396,10 +433,26 @@ def _do_action_async(action, target):
             progress_done(ok=False)
             return
 
+        si = 1
+        if action == "down_volumes" and tmpl_path:
+            progress_stage(si, "running")
+            try:
+                removed = purge_extra_dirs(cwd, tmpl_path)
+                if removed:
+                    progress_stage(si, "running", f"Removed dirs: {', '.join(removed)}")
+                else:
+                    progress_stage(si, "running", "No extra directories to remove")
+                progress_stage(si, "done")
+            except Exception as e:
+                progress_stage(si, "error", str(e))
+                progress_done(ok=False)
+                return
+            si += 1
+
         if (action == "down_volumes" and was_running) or action == "pull_up":
-            progress_stage(1, "running")
-            code, out = run_cmd_live(["docker", "compose", "up", "-d"], cwd=cwd, stage_idx=1)
-            progress_stage(1, "done" if code == 0 else "error")
+            progress_stage(si, "running")
+            code, out = run_cmd_live(["docker", "compose", "up", "-d"], cwd=cwd, stage_idx=si)
+            progress_stage(si, "done" if code == 0 else "error")
 
         progress_done(ok=code == 0)
 
@@ -641,7 +694,7 @@ LOGIN_HTML = """<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>FKM Instance Manager — Login</title>
+<title>FKMTime Instance Manager — Login</title>
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
   body{font-family:'Segoe UI',sans-serif;background:#0f1117;color:#e0e0e0;
@@ -662,7 +715,7 @@ LOGIN_HTML = """<!DOCTYPE html>
 </head>
 <body>
 <div class="box">
-  <h1>🐳 FKM Instance Manager</h1>
+  <h1>🐳 FKMTime Instance Manager</h1>
   <p>Enter your credentials to continue</p>
   <label>Username</label>
   <input type="text" id="u" autofocus>
@@ -692,7 +745,7 @@ MAIN_HTML = r"""<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>FKM Instance Manager</title>
+<title>FKMTime Instance Manager</title>
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
   body{font-family:'Segoe UI',sans-serif;background:#0f1117;color:#e0e0e0;min-height:100vh}
@@ -785,6 +838,11 @@ MAIN_HTML = r"""<!DOCTYPE html>
   .toast-info{background:#1a3a6a}
   @keyframes toastIn{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:translateX(0)}}
   @keyframes toastOut{from{opacity:1;transform:translateX(0)}to{opacity:0;transform:translateX(20px)}}
+  .logs-modal-overlay{display:none;position:fixed;inset:0;background:#000d;z-index:200;flex-direction:column;opacity:0;transition:opacity .2s ease}
+  .logs-modal-overlay.show{display:flex;opacity:1}
+  .logs-modal-header{display:flex;align-items:center;padding:14px 20px;background:#1a1d27;border-bottom:1px solid #2a2d3a;gap:12px}
+  .logs-modal-header h3{font-size:1rem;font-weight:600;color:#fff;flex:1;margin:0}
+  .logs-modal-body{flex:1;overflow-y:auto;padding:12px 16px;font-family:'Courier New',monospace;font-size:.78rem;white-space:pre-wrap;color:#b0c0a0;background:#0a0c10;line-height:1.6}
 </style>
 </head>
 <body>
@@ -793,7 +851,7 @@ MAIN_HTML = r"""<!DOCTYPE html>
 </div>
 <div class="toast-container" id="toast-container"></div>
 <header>
-  <h1>🐳 FKM Instance Manager</h1>
+  <h1>🐳 FKMTime Instance Manager</h1>
   <span id="hdr-selected" class="badge">…</span>
   <span id="hdr-status" class="badge badge-down">…</span>
   <span style="flex:1"></span>
@@ -895,6 +953,15 @@ MAIN_HTML = r"""<!DOCTYPE html>
     <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
     <div class="progress-stages" id="progress-stages"></div>
   </div>
+</div>
+
+<!-- Logs modal (full-screen) -->
+<div id="logs-modal-overlay" class="logs-modal-overlay">
+  <div class="logs-modal-header">
+    <h3>📋 Logs — <span id="logs-instance-name">…</span></h3>
+    <button class="btn-neutral" style="padding:6px 14px;font-size:.82rem" onclick="closeLogsModal()">✕ Close</button>
+  </div>
+  <div class="logs-modal-body" id="logs-body"></div>
 </div>
 
 <main>
@@ -1115,6 +1182,7 @@ function renderInstances(instances, selected) {
       btns += `<button class="btn-warn" title="Clear Data (docker compose down --volumes)" onclick="openModal()">🧹 Clear</button>`;
     }
     btns += `<button class="btn-neutral" onclick="showBackupModal('${name}')" title="Backup & Download">📦</button>`;
+    if (info.running) btns += `<button class="btn-neutral" onclick="openLogsModal('${name}')" title="View Logs">📋</button>`;
     btns += `<button class="btn-danger" onclick="showDeleteModal('${name}')">🗑</button>`;
 
     html += `
@@ -1455,6 +1523,29 @@ async function confirmBackup() {
   }, 800);
 }
 
+// Logs modal
+let _logsEventSource = null;
+function openLogsModal(name) {
+  document.getElementById('logs-instance-name').textContent = name;
+  const body = document.getElementById('logs-body');
+  body.textContent = '';
+  document.getElementById('logs-modal-overlay').classList.add('show');
+  if (_logsEventSource) { _logsEventSource.close(); _logsEventSource = null; }
+  _logsEventSource = new EventSource('/api/logs?name=' + encodeURIComponent(name));
+  _logsEventSource.onmessage = function(e) {
+    body.textContent += e.data + '\n';
+    body.scrollTop = body.scrollHeight;
+  };
+  _logsEventSource.onerror = function() {
+    _logsEventSource.close();
+    _logsEventSource = null;
+  };
+}
+function closeLogsModal() {
+  document.getElementById('logs-modal-overlay').classList.remove('show');
+  if (_logsEventSource) { _logsEventSource.close(); _logsEventSource = null; }
+}
+
 // ── Boot: restore saved state then fetch live data ─────────────────────
 (async () => {
   // Restore saved tab
@@ -1580,6 +1671,39 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(get_progress())
         elif path == "/api/templates":
             self.send_json({"templates": list(get_templates().keys())})
+        elif path == "/api/logs":
+            qs = parse_qs(urlparse(self.path).query)
+            name = qs.get("name", [""])[0]
+            insts = get_instances()
+            if not name or name not in insts:
+                self.send_json({"ok": False, "error": "Instance not found"}, code=404)
+                return
+            cwd = insts[name]
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "keep-alive")
+            self.end_headers()
+            try:
+                proc = subprocess.Popen(
+                    ["docker", "compose", "logs", "-f", "--tail", "200"],
+                    cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    text=True, bufsize=1
+                )
+                for line in proc.stdout:
+                    data = line.rstrip("\n").replace("\n", "\ndata: ")
+                    self.wfile.write(f"data: {data}\n\n".encode())
+                    self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            except Exception:
+                pass
+            finally:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+            return
         elif path == "/api/instance/backup/download":
             qs = parse_qs(urlparse(self.path).query)
             name = qs.get("name", [""])[0]
@@ -1751,7 +1875,7 @@ if __name__ == "__main__":
 
     main_server = ThreadingHTTPServer(("0.0.0.0", PORT_MAIN), Handler)
     threading.Thread(target=main_server.serve_forever, daemon=True).start()
-    print(f"FKM Instance Manager running on http://0.0.0.0:{PORT_MAIN}")
+    print(f"FKMTime Instance Manager running on http://0.0.0.0:{PORT_MAIN}")
     print(f"Instances directory: {INSTANCES_DIR}")
     print(f"Templates: {list(get_templates().keys())}")
     print(f"Selected instance: {get_selected() or 'none'}")
