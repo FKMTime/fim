@@ -269,6 +269,9 @@ def create_instance(name, template_key):
     dst = os.path.join(INSTANCES_DIR, name)
     try:
         shutil.copytree(src, dst)
+        # Store which template was used
+        with open(os.path.join(dst, ".fkm_template"), "w") as f:
+            f.write(template_key)
         env_template = os.path.join(dst, ".env.template")
         env_file = os.path.join(dst, ".env")
         if os.path.isfile(env_template) and not os.path.isfile(env_file):
@@ -279,6 +282,36 @@ def create_instance(name, template_key):
         return True, None
     except Exception as e:
         return False, str(e)
+
+def get_instance_template_path(name):
+    """Return the template directory path for an instance, or None."""
+    insts = get_instances()
+    if name not in insts:
+        return None
+    tmpl_file = os.path.join(insts[name], ".fkm_template")
+    if os.path.isfile(tmpl_file):
+        try:
+            with open(tmpl_file) as f:
+                tmpl_key = f.read().strip()
+            tmpl_path = get_templates().get(tmpl_key)
+            if tmpl_path and os.path.isdir(tmpl_path):
+                return tmpl_path
+        except Exception:
+            pass
+    return None
+
+def purge_extra_dirs(instance_path, template_path):
+    """Delete directories in instance that don't exist in the template. Returns list of removed dirs."""
+    template_entries = set(os.listdir(template_path))
+    removed = []
+    for entry in os.listdir(instance_path):
+        entry_path = os.path.join(instance_path, entry)
+        if os.path.islink(entry_path):
+            continue
+        if os.path.isdir(entry_path) and entry not in template_entries:
+            shutil.rmtree(entry_path)
+            removed.append(entry)
+    return removed
 
 def delete_instance(name):
     name = name.strip()
@@ -379,10 +412,14 @@ def _do_action_async(action, target):
             return
         # For down_volumes: check if containers were running so we can restart after
         was_running = False
+        tmpl_path = None
         if action == "down_volumes":
             was_running, _ = compose_status(use_name)
+            tmpl_path = get_instance_template_path(use_name)
 
         stages = [label]
+        if action == "down_volumes" and tmpl_path:
+            stages.append(f"Purge extra dirs for {use_name}")
         if action == "down_volumes" and was_running:
             stages.append(f"Restart {use_name}")
         if action == "pull_up":
@@ -396,10 +433,26 @@ def _do_action_async(action, target):
             progress_done(ok=False)
             return
 
+        si = 1
+        if action == "down_volumes" and tmpl_path:
+            progress_stage(si, "running")
+            try:
+                removed = purge_extra_dirs(cwd, tmpl_path)
+                if removed:
+                    progress_stage(si, "running", f"Removed dirs: {', '.join(removed)}")
+                else:
+                    progress_stage(si, "running", "No extra directories to remove")
+                progress_stage(si, "done")
+            except Exception as e:
+                progress_stage(si, "error", str(e))
+                progress_done(ok=False)
+                return
+            si += 1
+
         if (action == "down_volumes" and was_running) or action == "pull_up":
-            progress_stage(1, "running")
-            code, out = run_cmd_live(["docker", "compose", "up", "-d"], cwd=cwd, stage_idx=1)
-            progress_stage(1, "done" if code == 0 else "error")
+            progress_stage(si, "running")
+            code, out = run_cmd_live(["docker", "compose", "up", "-d"], cwd=cwd, stage_idx=si)
+            progress_stage(si, "done" if code == 0 else "error")
 
         progress_done(ok=code == 0)
 
@@ -1641,7 +1694,6 @@ class Handler(BaseHTTPRequestHandler):
                     data = line.rstrip("\n").replace("\n", "\ndata: ")
                     self.wfile.write(f"data: {data}\n\n".encode())
                     self.wfile.flush()
-                proc.wait(timeout=5)
             except (BrokenPipeError, ConnectionResetError):
                 pass
             except Exception:
