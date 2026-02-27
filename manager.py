@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-"""FKM Instance Manager - Port 8181 (+ dynamic port 80) - DYNAMIC INSTANCES"""
+"""FKMTime Instance Manager - Port 8181 (+ dynamic port 80) - DYNAMIC INSTANCES"""
 
 import os, json, subprocess, threading, hashlib, secrets, time, shutil, tarfile
 
@@ -694,7 +694,7 @@ LOGIN_HTML = """<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>FKM Instance Manager — Login</title>
+<title>FKMTime Instance Manager — Login</title>
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
   body{font-family:'Segoe UI',sans-serif;background:#0f1117;color:#e0e0e0;
@@ -715,7 +715,7 @@ LOGIN_HTML = """<!DOCTYPE html>
 </head>
 <body>
 <div class="box">
-  <h1>🐳 FKM Instance Manager</h1>
+  <h1>🐳 FKMTime Instance Manager</h1>
   <p>Enter your credentials to continue</p>
   <label>Username</label>
   <input type="text" id="u" autofocus>
@@ -745,7 +745,7 @@ MAIN_HTML = r"""<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>FKM Instance Manager</title>
+<title>FKMTime Instance Manager</title>
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
   body{font-family:'Segoe UI',sans-serif;background:#0f1117;color:#e0e0e0;min-height:100vh}
@@ -851,7 +851,7 @@ MAIN_HTML = r"""<!DOCTYPE html>
 </div>
 <div class="toast-container" id="toast-container"></div>
 <header>
-  <h1>🐳 FKM Instance Manager</h1>
+  <h1>🐳 FKMTime Instance Manager</h1>
   <span id="hdr-selected" class="badge">…</span>
   <span id="hdr-status" class="badge badge-down">…</span>
   <span style="flex:1"></span>
@@ -1182,7 +1182,7 @@ function renderInstances(instances, selected) {
       btns += `<button class="btn-warn" title="Clear Data (docker compose down --volumes)" onclick="openModal()">🧹 Clear</button>`;
     }
     btns += `<button class="btn-neutral" onclick="showBackupModal('${name}')" title="Backup & Download">📦</button>`;
-    btns += `<button class="btn-neutral" onclick="openLogsModal('${name}')" title="View Logs">📋</button>`;
+    if (info.running) btns += `<button class="btn-neutral" onclick="openLogsModal('${name}')" title="View Logs">📋</button>`;
     btns += `<button class="btn-danger" onclick="showDeleteModal('${name}')">🗑</button>`;
 
     html += `
@@ -1875,7 +1875,7 @@ if __name__ == "__main__":
 
     main_server = ThreadingHTTPServer(("0.0.0.0", PORT_MAIN), Handler)
     threading.Thread(target=main_server.serve_forever, daemon=True).start()
-    print(f"FKM Instance Manager running on http://0.0.0.0:{PORT_MAIN}")
+    print(f"FKMTime Instance Manager running on http://0.0.0.0:{PORT_MAIN}")
     print(f"Instances directory: {INSTANCES_DIR}")
     print(f"Templates: {list(get_templates().keys())}")
     print(f"Selected instance: {get_selected() or 'none'}")
