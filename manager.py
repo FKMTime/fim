@@ -237,6 +237,23 @@ def write_env(name, content):
     with open(os.path.join(insts[name], ".env"), "w") as f:
         f.write(content)
 
+def read_compose(name):
+    insts = get_instances()
+    if name not in insts:
+        return ""
+    try:
+        with open(os.path.join(insts[name], "docker-compose.yml")) as f:
+            return f.read()
+    except FileNotFoundError:
+        return ""
+
+def write_compose(name, content):
+    insts = get_instances()
+    if name not in insts:
+        raise FileNotFoundError("Instance not found")
+    with open(os.path.join(insts[name], "docker-compose.yml"), "w") as f:
+        f.write(content)
+
 # ── Instance management ─────────────────────────────────────────────────────
 
 def create_instance(name, template_key):
@@ -495,6 +512,30 @@ def _do_env_restart_async(name):
         progress_stage(0, "running", f"$ docker compose up -d ({name})")
         code, out = run_cmd_live(["docker", "compose", "up", "-d"], cwd=insts[name], stage_idx=0)
         progress_stage(0, "done" if code == 0 else "error")
+        progress_done(ok=code == 0)
+
+def _do_compose_restart_async(name):
+    """Down then up compose after docker-compose.yml change."""
+    with _action_lock:
+        insts = get_instances()
+        if name not in insts:
+            progress_reset([f"Restart {name}"])
+            progress_stage(0, "error", "Instance not found")
+            progress_done(ok=False)
+            return
+        cwd = insts[name]
+        progress_reset([f"Stop {name}", f"Start {name}"])
+        progress_stage(0, "running")
+        progress_stage(0, "running", f"$ docker compose down ({name})")
+        code, out = run_cmd_live(["docker", "compose", "down"], cwd=cwd, stage_idx=0)
+        progress_stage(0, "done" if code == 0 else "error")
+        if code != 0:
+            progress_done(ok=False)
+            return
+        progress_stage(1, "running")
+        progress_stage(1, "running", f"$ docker compose up -d ({name})")
+        code, out = run_cmd_live(["docker", "compose", "up", "-d"], cwd=cwd, stage_idx=1)
+        progress_stage(1, "done" if code == 0 else "error")
         progress_done(ok=code == 0)
 
 # ── Dynamic port 80 manager ─────────────────────────────────────────────────
@@ -760,6 +801,18 @@ MAIN_HTML = r"""<!DOCTYPE html>
   </div>
 </div>
 
+<!-- Compose save confirm modal -->
+<div id="compose-save-modal-overlay" class="modal-overlay">
+  <div class="modal">
+    <h3 style="color:#ffaa60">📝 Save docker-compose.yml?</h3>
+    <p>This will overwrite the current <code>docker-compose.yml</code>.<br><br>If the instance is running, it will be stopped and restarted to apply the changes.</p>
+    <div class="row">
+      <button class="btn-success" onclick="confirmComposeSave()">Save &amp; Apply</button>
+      <button class="btn-neutral" onclick="closeComposeSaveModal()">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <!-- Progress modal overlay -->
 <div id="progress-modal-overlay" class="progress-modal-overlay">
   <div class="progress-modal">
@@ -773,6 +826,7 @@ MAIN_HTML = r"""<!DOCTYPE html>
   <div class="tabs">
     <div class="tab active" onclick="switchTab('control')">Control</div>
     <div class="tab" onclick="switchTab('env')">Env Editor</div>
+    <div class="tab" onclick="switchTab('compose')">Compose</div>
     <div class="tab" onclick="switchTab('wifi')">WiFi</div>
   </div>
   <div class="panel active" id="tab-control">
@@ -795,6 +849,18 @@ MAIN_HTML = r"""<!DOCTYPE html>
         <button class="btn-success" onclick="saveEnv()">💾 Save .env</button>
         <button class="btn-neutral" onclick="loadEnv()">↻ Reload</button>
         <span id="env-save-msg" style="font-size:.82rem"></span>
+      </div>
+    </div>
+  </div>
+  <div class="panel" id="tab-compose">
+    <div class="card">
+      <h2>Compose Editor — <span id="compose-instance-label" style="color:#888">…</span></h2>
+      <div class="section-title">docker-compose.yml</div>
+      <textarea id="compose-content" rows="20" placeholder="# docker-compose.yml is empty or missing"></textarea>
+      <div class="row" style="margin-top:10px">
+        <button class="btn-success" onclick="showComposeSaveModal()">💾 Save docker-compose.yml</button>
+        <button class="btn-neutral" onclick="loadCompose()">↻ Reload</button>
+        <span id="compose-save-msg" style="font-size:.82rem"></span>
       </div>
     </div>
   </div>
@@ -903,14 +969,15 @@ function showToast(msg, type='info') {
 
 // ── Tab switching with persistence ─────────────────────────────────────
 function switchTab(name) {
-  ['control','env','wifi'].forEach((n,i) => {
+  ['control','env','compose','wifi'].forEach((n,i) => {
     document.querySelectorAll('.tab')[i].classList.toggle('active', n===name);
     const panel = document.querySelectorAll('.panel')[i];
     panel.classList.toggle('active', n===name);
   });
   lsSet(LS_TAB, name);
-  if (name==='env')  loadEnv();
-  if (name==='wifi') loadWifi();
+  if (name==='env')     loadEnv();
+  if (name==='compose') loadCompose();
+  if (name==='wifi')    loadWifi();
 }
 
 async function api(path, body=null) {
@@ -1110,6 +1177,38 @@ async function saveEnv() {
     startProgressPolling();
   } else {
     showToast(data.ok ? 'Environment saved' : 'Failed to save .env', data.ok ? 'success' : 'error');
+  }
+}
+
+// Compose
+async function loadCompose() {
+  const data = await api('/api/compose');
+  if (!data) return;
+  document.getElementById('compose-content').value = data.content || '';
+  document.getElementById('compose-instance-label').textContent = data.selected || 'none';
+  document.getElementById('compose-save-msg').textContent = '';
+}
+
+function showComposeSaveModal() {
+  document.getElementById('compose-save-modal-overlay').classList.add('show');
+}
+function closeComposeSaveModal() {
+  document.getElementById('compose-save-modal-overlay').classList.remove('show');
+}
+
+async function confirmComposeSave() {
+  closeComposeSaveModal();
+  const content = document.getElementById('compose-content').value;
+  const data = await api('/api/compose/save', {content});
+  if (!data) return;
+  const msg = document.getElementById('compose-save-msg');
+  msg.textContent = data.ok ? '✓ Saved' : ('✗ ' + data.error);
+  msg.style.color = data.ok ? '#60ff90' : '#ff6060';
+  if (data.ok && data.restarting) {
+    showToast('Saved — restarting compose to apply changes…', 'info');
+    startProgressPolling();
+  } else {
+    showToast(data.ok ? 'Compose file saved' : 'Failed to save', data.ok ? 'success' : 'error');
   }
 }
 
@@ -1332,6 +1431,10 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"selected": selected,
                             "template": read_template(selected),
                             "content":  read_env(selected)})
+        elif path == "/api/compose":
+            selected = get_selected()
+            self.send_json({"selected": selected,
+                            "content":  read_compose(selected)})
         elif path == "/api/wifi/current":
             def uci_get(key):
                 code, out = run_cmd(["uci", "get", key], timeout=5)
@@ -1436,6 +1539,20 @@ class Handler(BaseHTTPRequestHandler):
                     if running and _action_lock.acquire(blocking=False):
                         _action_lock.release()
                         threading.Thread(target=_do_env_restart_async, args=(selected,), daemon=True).start()
+                        restarting = True
+                self.send_json({"ok": True, "restarting": restarting})
+            except Exception as e:
+                self.send_json({"ok": False, "error": str(e)})
+        elif path == "/api/compose/save":
+            selected = get_selected()
+            try:
+                write_compose(selected, body.get("content", ""))
+                restarting = False
+                if selected:
+                    running, _ = compose_status(selected)
+                    if running and _action_lock.acquire(blocking=False):
+                        _action_lock.release()
+                        threading.Thread(target=_do_compose_restart_async, args=(selected,), daemon=True).start()
                         restarting = True
                 self.send_json({"ok": True, "restarting": restarting})
             except Exception as e:
