@@ -836,8 +836,11 @@ function clearOutput() {
 document.addEventListener('click', function(e) {
   if (_busy) return;
   if (e.target.closest('#output-panel')) return;
-  const panel = document.getElementById('output-panel');
-  if (panel.classList.contains('show')) panel.classList.remove('show');
+  if (!_outputCollapsed && document.getElementById('output-panel').classList.contains('show')) {
+    _outputCollapsed = true;
+    document.getElementById('output-body').classList.add('collapsed');
+    document.getElementById('output-chevron').classList.remove('up');
+  }
 });
 
 // ── localStorage helpers ───────────────────────────────────────────────
