@@ -269,6 +269,10 @@ def create_instance(name, template_key):
     dst = os.path.join(INSTANCES_DIR, name)
     try:
         shutil.copytree(src, dst)
+        env_template = os.path.join(dst, ".env.template")
+        env_file = os.path.join(dst, ".env")
+        if os.path.isfile(env_template) and not os.path.isfile(env_file):
+            shutil.copy2(env_template, env_file)
         refresh_instances()
         if get_selected() is None:
             set_selected(name)
