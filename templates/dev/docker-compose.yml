@@ -1,4 +1,4 @@
-ervices:
+services:
   backend:
     image: "ghcr.io/fkmtime/fkmtime-backend:main"
     restart: unless-stopped
@@ -37,7 +37,7 @@ ervices:
       - POSTGRES_PASSWORD=password
       - POSTGRES_DB=fkm_time
     volumes:
-      - database:/var/lib/postgresql
+      - ./db:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -d postgres"]
       interval: 5s
@@ -116,7 +116,7 @@ ervices:
       - 1.1.1.1
     volumes:
       - /run/dbus:/run/dbus:ro
-      - logs:/logs
+      - ./logs:/logs
       - sock:/app/sock
     environment:
       - PORT=8081
@@ -133,6 +133,4 @@ ervices:
       backend:
         condition: service_healthy
 volumes:
-  database:
   sock:
-  logs:
