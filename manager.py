@@ -349,10 +349,28 @@ def _do_action_async(action, target):
             progress_stage(0, "error", "Unknown action")
             progress_done(ok=False)
             return
-        progress_reset([label])
+        # For down_volumes: check if containers were running so we can restart after
+        was_running = False
+        if action == "down_volumes":
+            was_running, _ = compose_status(use_name)
+
+        stages = [label]
+        if action == "down_volumes" and was_running:
+            stages.append(f"Restart {use_name}")
+
+        progress_reset(stages)
         progress_stage(0, "running")
         code, out = run_cmd_live(cmd, cwd=cwd, stage_idx=0)
         progress_stage(0, "done" if code == 0 else "error")
+        if code != 0:
+            progress_done(ok=False)
+            return
+
+        if action == "down_volumes" and was_running:
+            progress_stage(1, "running")
+            code, out = run_cmd_live(["docker", "compose", "up", "-d"], cwd=cwd, stage_idx=1)
+            progress_stage(1, "done" if code == 0 else "error")
+
         progress_done(ok=code == 0)
 
 def _do_delete_async(name):
