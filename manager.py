@@ -16,6 +16,8 @@ LOCK_FILE     = os.path.join(SCRIPT_DIR, ".instance_selected")
 AUTH_FILE     = os.path.join(SCRIPT_DIR, "auth.json")
 PORT_MAIN     = 8181
 PORT_ALT      = 80
+IS_OPENWRT    = os.path.isfile("/etc/openwrt_release")
+IS_ROOT       = os.geteuid() == 0
 
 def get_templates():
     """Scan templates directory and return {name: path} for each subdirectory."""
@@ -181,6 +183,27 @@ def run_cmd_live(args, cwd=None, timeout=180, stage_idx=0):
     except Exception as e:
         return -1, str(e) + "\n"
 
+def force_rmtree(path):
+    """Remove a directory tree, falling back to docker if not running as root."""
+    try:
+        shutil.rmtree(path)
+    except PermissionError:
+        if IS_ROOT:
+            raise
+        abspath = os.path.abspath(path)
+        parent  = os.path.dirname(abspath)
+        name    = os.path.basename(abspath)
+        code, out = run_cmd(
+            ["docker", "run", "--rm", "-v", f"{parent}:/mnt", "alpine",
+             "rm", "-rf", f"/mnt/{name}"],
+            timeout=60,
+        )
+        if code != 0:
+            raise PermissionError(
+                f"Permission denied and docker fallback failed: {out.strip()}"
+            )
+
+
 def compose_status(name):
     insts = get_instances()
     if name not in insts:
@@ -309,7 +332,7 @@ def purge_extra_dirs(instance_path, template_path):
         if os.path.islink(entry_path):
             continue
         if os.path.isdir(entry_path) and entry not in template_entries:
-            shutil.rmtree(entry_path)
+            force_rmtree(entry_path)
             removed.append(entry)
     return removed
 
@@ -325,7 +348,7 @@ def delete_instance(name):
     if code != 0:
         output += "WARNING: docker compose down --volumes failed (continuing with folder removal)\n"
     try:
-        shutil.rmtree(path)
+        force_rmtree(path)
         refresh_instances()
         if get_selected() == name:
             new_insts = get_instances()
@@ -471,7 +494,7 @@ def _do_delete_async(name):
         progress_stage(0, "done" if code == 0 else "error")
         progress_stage(1, "running")
         try:
-            shutil.rmtree(path)
+            force_rmtree(path)
             refresh_instances()
             if get_selected() == name:
                 new_insts = get_instances()
@@ -661,6 +684,8 @@ _port80_lock     = threading.Lock()
 _port80_running  = False
 
 def _update_port80():
+    if not IS_ROOT:
+        return
     global _port80_server, _port80_running
     should_run = not any_instance_running()
     with _port80_lock:
@@ -760,7 +785,8 @@ MAIN_HTML = r"""<!DOCTYPE html>
   .tabs{display:flex;gap:4px;margin-bottom:20px;border-bottom:1px solid #2a2d3a}
   .tab{padding:10px 20px;cursor:pointer;border-radius:8px 8px 0 0;font-size:.9rem;background:#1a1d27;color:#888;border:1px solid #2a2d3a;border-bottom:none;transition:all .2s}
   .tab.active{background:#22253a;color:#fff;border-color:#3a3d5a}
-  .tab:hover:not(.active){color:#ccc}
+  .tab:hover:not(.active):not(.tab-disabled){color:#ccc}
+  .tab.tab-disabled{color:#555;cursor:not-allowed;opacity:.5}
   .panel{display:none;animation:fadeIn .25s ease}.panel.active{display:block}
   @keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
   .card{background:#1a1d27;border:1px solid #2a2d3a;border-radius:10px;padding:20px;margin-bottom:16px}
@@ -969,7 +995,7 @@ MAIN_HTML = r"""<!DOCTYPE html>
     <div class="tab active" onclick="switchTab('control')">Control</div>
     <div class="tab" onclick="switchTab('env')">Env Editor</div>
     <div class="tab" onclick="switchTab('compose')">Compose</div>
-    <div class="tab" onclick="switchTab('wifi')">WiFi</div>
+    <div class="tab" id="tab-wifi-btn" onclick="switchTab('wifi')">WiFi</div>
   </div>
   <div class="panel active" id="tab-control">
     <div class="card">
@@ -1049,7 +1075,8 @@ MAIN_HTML = r"""<!DOCTYPE html>
 </div>
 
 <script>
-const ON_PORT80 = (location.port === '' || location.port === '80');
+const ON_PORT80  = (location.port === '' || location.port === '80');
+const IS_OPENWRT = __IS_OPENWRT__;
 const LS_TAB    = 'fkm_active_tab';
 const LS_LOG    = 'fkm_action_log';
 const LS_STATUS = 'fkm_last_status';
@@ -1111,6 +1138,10 @@ function showToast(msg, type='info') {
 
 // ── Tab switching with persistence ─────────────────────────────────────
 function switchTab(name) {
+  if (name === 'wifi' && !IS_OPENWRT) {
+    showToast('WiFi management is only available on OpenWrt', 'error');
+    return;
+  }
   ['control','env','compose','wifi'].forEach((n,i) => {
     document.querySelectorAll('.tab')[i].classList.toggle('active', n===name);
     const panel = document.querySelectorAll('.panel')[i];
@@ -1548,9 +1579,15 @@ function closeLogsModal() {
 
 // ── Boot: restore saved state then fetch live data ─────────────────────
 (async () => {
-  // Restore saved tab
+  // Disable WiFi tab when not running on OpenWrt
+  if (!IS_OPENWRT) {
+    document.getElementById('tab-wifi-btn').classList.add('tab-disabled');
+  }
+
+  // Restore saved tab (skip wifi on non-OpenWrt, default to control)
   const savedTab = lsGet(LS_TAB, 'control');
-  if (savedTab !== 'control') switchTab(savedTab);
+  const canRestore = savedTab !== 'control' && (IS_OPENWRT || savedTab !== 'wifi');
+  if (canRestore) switchTab(savedTab);
 
   // Restore cached status instantly (prevents blank screen on reload)
   const cached = lsGet(LS_STATUS, null);
@@ -1616,7 +1653,7 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if path in ("/", ""):
             if self.is_auth():
-                self.send_html(MAIN_HTML)
+                self.send_html(MAIN_HTML.replace("__IS_OPENWRT__", json.dumps(IS_OPENWRT)))
             else:
                 self.send_html(LOGIN_HTML)
             return
@@ -1639,6 +1676,9 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"selected": selected,
                             "content":  read_compose(selected)})
         elif path == "/api/wifi/current":
+            if not IS_OPENWRT:
+                self.send_json({"ok": False, "error": "WiFi management requires OpenWrt"})
+                return
             def uci_get(key):
                 code, out = run_cmd(["uci", "get", key], timeout=5)
                 return out.strip() if code == 0 else ""
@@ -1846,6 +1886,9 @@ class Handler(BaseHTTPRequestHandler):
             threading.Thread(target=_do_backup_async, args=(name,), daemon=True).start()
             self.send_json({"ok": True})
         elif path == "/api/wifi":
+            if not IS_OPENWRT:
+                self.send_json({"ok": False, "error": "WiFi management requires OpenWrt"})
+                return
             hs_ssid  = body.get("hs_ssid", "")
             hs_psk   = body.get("hs_psk", "")
             sta_ssid = body.get("sta_ssid", "")
@@ -1879,6 +1922,10 @@ if __name__ == "__main__":
     print(f"Instances directory: {INSTANCES_DIR}")
     print(f"Templates: {list(get_templates().keys())}")
     print(f"Selected instance: {get_selected() or 'none'}")
+    print(f"OpenWrt detected: {IS_OPENWRT}")
+    print(f"Running as root: {IS_ROOT}")
+    if not IS_ROOT:
+        print("Port 80 listener disabled (not running as root)")
 
     threading.Thread(target=_port80_monitor, daemon=True).start()
     _update_port80()
