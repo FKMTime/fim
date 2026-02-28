@@ -16,6 +16,7 @@ LOCK_FILE     = os.path.join(SCRIPT_DIR, ".instance_selected")
 AUTH_FILE     = os.path.join(SCRIPT_DIR, "auth.json")
 PORT_MAIN     = 8181
 PORT_ALT      = 80
+IS_OPENWRT    = os.path.isfile("/etc/openwrt_release")
 
 def get_templates():
     """Scan templates directory and return {name: path} for each subdirectory."""
@@ -969,7 +970,7 @@ MAIN_HTML = r"""<!DOCTYPE html>
     <div class="tab active" onclick="switchTab('control')">Control</div>
     <div class="tab" onclick="switchTab('env')">Env Editor</div>
     <div class="tab" onclick="switchTab('compose')">Compose</div>
-    <div class="tab" onclick="switchTab('wifi')">WiFi</div>
+    <div class="tab" id="tab-wifi-btn" onclick="switchTab('wifi')">WiFi</div>
   </div>
   <div class="panel active" id="tab-control">
     <div class="card">
@@ -1049,7 +1050,8 @@ MAIN_HTML = r"""<!DOCTYPE html>
 </div>
 
 <script>
-const ON_PORT80 = (location.port === '' || location.port === '80');
+const ON_PORT80  = (location.port === '' || location.port === '80');
+const IS_OPENWRT = __IS_OPENWRT__;
 const LS_TAB    = 'fkm_active_tab';
 const LS_LOG    = 'fkm_action_log';
 const LS_STATUS = 'fkm_last_status';
@@ -1548,9 +1550,16 @@ function closeLogsModal() {
 
 // ── Boot: restore saved state then fetch live data ─────────────────────
 (async () => {
-  // Restore saved tab
+  // Hide WiFi tab when not running on OpenWrt
+  if (!IS_OPENWRT) {
+    document.getElementById('tab-wifi-btn').style.display = 'none';
+    document.getElementById('tab-wifi').style.display = 'none';
+  }
+
+  // Restore saved tab (skip wifi on non-OpenWrt, default to control)
   const savedTab = lsGet(LS_TAB, 'control');
-  if (savedTab !== 'control') switchTab(savedTab);
+  const canRestore = savedTab !== 'control' && (IS_OPENWRT || savedTab !== 'wifi');
+  if (canRestore) switchTab(savedTab);
 
   // Restore cached status instantly (prevents blank screen on reload)
   const cached = lsGet(LS_STATUS, null);
@@ -1616,7 +1625,7 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if path in ("/", ""):
             if self.is_auth():
-                self.send_html(MAIN_HTML)
+                self.send_html(MAIN_HTML.replace("__IS_OPENWRT__", json.dumps(IS_OPENWRT)))
             else:
                 self.send_html(LOGIN_HTML)
             return
@@ -1639,6 +1648,9 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"selected": selected,
                             "content":  read_compose(selected)})
         elif path == "/api/wifi/current":
+            if not IS_OPENWRT:
+                self.send_json({"ok": False, "error": "WiFi management requires OpenWrt"})
+                return
             def uci_get(key):
                 code, out = run_cmd(["uci", "get", key], timeout=5)
                 return out.strip() if code == 0 else ""
@@ -1846,6 +1858,9 @@ class Handler(BaseHTTPRequestHandler):
             threading.Thread(target=_do_backup_async, args=(name,), daemon=True).start()
             self.send_json({"ok": True})
         elif path == "/api/wifi":
+            if not IS_OPENWRT:
+                self.send_json({"ok": False, "error": "WiFi management requires OpenWrt"})
+                return
             hs_ssid  = body.get("hs_ssid", "")
             hs_psk   = body.get("hs_psk", "")
             sta_ssid = body.get("sta_ssid", "")
@@ -1879,6 +1894,7 @@ if __name__ == "__main__":
     print(f"Instances directory: {INSTANCES_DIR}")
     print(f"Templates: {list(get_templates().keys())}")
     print(f"Selected instance: {get_selected() or 'none'}")
+    print(f"OpenWrt detected: {IS_OPENWRT}")
 
     threading.Thread(target=_port80_monitor, daemon=True).start()
     _update_port80()
