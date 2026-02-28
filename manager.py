@@ -761,7 +761,8 @@ MAIN_HTML = r"""<!DOCTYPE html>
   .tabs{display:flex;gap:4px;margin-bottom:20px;border-bottom:1px solid #2a2d3a}
   .tab{padding:10px 20px;cursor:pointer;border-radius:8px 8px 0 0;font-size:.9rem;background:#1a1d27;color:#888;border:1px solid #2a2d3a;border-bottom:none;transition:all .2s}
   .tab.active{background:#22253a;color:#fff;border-color:#3a3d5a}
-  .tab:hover:not(.active){color:#ccc}
+  .tab:hover:not(.active):not(.tab-disabled){color:#ccc}
+  .tab.tab-disabled{color:#555;cursor:not-allowed;opacity:.5}
   .panel{display:none;animation:fadeIn .25s ease}.panel.active{display:block}
   @keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
   .card{background:#1a1d27;border:1px solid #2a2d3a;border-radius:10px;padding:20px;margin-bottom:16px}
@@ -1113,6 +1114,10 @@ function showToast(msg, type='info') {
 
 // ── Tab switching with persistence ─────────────────────────────────────
 function switchTab(name) {
+  if (name === 'wifi' && !IS_OPENWRT) {
+    showToast('WiFi management is only available on OpenWrt', 'error');
+    return;
+  }
   ['control','env','compose','wifi'].forEach((n,i) => {
     document.querySelectorAll('.tab')[i].classList.toggle('active', n===name);
     const panel = document.querySelectorAll('.panel')[i];
@@ -1550,10 +1555,9 @@ function closeLogsModal() {
 
 // ── Boot: restore saved state then fetch live data ─────────────────────
 (async () => {
-  // Hide WiFi tab when not running on OpenWrt
+  // Disable WiFi tab when not running on OpenWrt
   if (!IS_OPENWRT) {
-    document.getElementById('tab-wifi-btn').style.display = 'none';
-    document.getElementById('tab-wifi').style.display = 'none';
+    document.getElementById('tab-wifi-btn').classList.add('tab-disabled');
   }
 
   // Restore saved tab (skip wifi on non-OpenWrt, default to control)
