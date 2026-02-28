@@ -17,6 +17,7 @@ AUTH_FILE     = os.path.join(SCRIPT_DIR, "auth.json")
 PORT_MAIN     = 8181
 PORT_ALT      = 80
 IS_OPENWRT    = os.path.isfile("/etc/openwrt_release")
+IS_ROOT       = os.geteuid() == 0
 
 def get_templates():
     """Scan templates directory and return {name: path} for each subdirectory."""
@@ -182,6 +183,27 @@ def run_cmd_live(args, cwd=None, timeout=180, stage_idx=0):
     except Exception as e:
         return -1, str(e) + "\n"
 
+def force_rmtree(path):
+    """Remove a directory tree, falling back to docker if not running as root."""
+    try:
+        shutil.rmtree(path)
+    except PermissionError:
+        if IS_ROOT:
+            raise
+        abspath = os.path.abspath(path)
+        parent  = os.path.dirname(abspath)
+        name    = os.path.basename(abspath)
+        code, out = run_cmd(
+            ["docker", "run", "--rm", "-v", f"{parent}:/mnt", "alpine",
+             "rm", "-rf", f"/mnt/{name}"],
+            timeout=60,
+        )
+        if code != 0:
+            raise PermissionError(
+                f"Permission denied and docker fallback failed: {out.strip()}"
+            )
+
+
 def compose_status(name):
     insts = get_instances()
     if name not in insts:
@@ -310,7 +332,7 @@ def purge_extra_dirs(instance_path, template_path):
         if os.path.islink(entry_path):
             continue
         if os.path.isdir(entry_path) and entry not in template_entries:
-            shutil.rmtree(entry_path)
+            force_rmtree(entry_path)
             removed.append(entry)
     return removed
 
@@ -326,7 +348,7 @@ def delete_instance(name):
     if code != 0:
         output += "WARNING: docker compose down --volumes failed (continuing with folder removal)\n"
     try:
-        shutil.rmtree(path)
+        force_rmtree(path)
         refresh_instances()
         if get_selected() == name:
             new_insts = get_instances()
@@ -472,7 +494,7 @@ def _do_delete_async(name):
         progress_stage(0, "done" if code == 0 else "error")
         progress_stage(1, "running")
         try:
-            shutil.rmtree(path)
+            force_rmtree(path)
             refresh_instances()
             if get_selected() == name:
                 new_insts = get_instances()
@@ -662,6 +684,8 @@ _port80_lock     = threading.Lock()
 _port80_running  = False
 
 def _update_port80():
+    if not IS_ROOT:
+        return
     global _port80_server, _port80_running
     should_run = not any_instance_running()
     with _port80_lock:
@@ -1899,6 +1923,9 @@ if __name__ == "__main__":
     print(f"Templates: {list(get_templates().keys())}")
     print(f"Selected instance: {get_selected() or 'none'}")
     print(f"OpenWrt detected: {IS_OPENWRT}")
+    print(f"Running as root: {IS_ROOT}")
+    if not IS_ROOT:
+        print("Port 80 listener disabled (not running as root)")
 
     threading.Thread(target=_port80_monitor, daemon=True).start()
     _update_port80()
