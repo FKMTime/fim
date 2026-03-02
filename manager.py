@@ -190,7 +190,7 @@ def sanitize_wifi_value(value, field, max_len=64):
         raise ValueError(f"Invalid {field}")
     if len(value) > max_len:
         raise ValueError(f"{field} too long")
-    if any(c in value for c in ("\x00", "\n", "\r", "=")):
+    if any(c in value for c in {"\x00", "\n", "\r", "=", ";", "&", "|", "$", "`", "(", ")", "<", ">", '"', "'", "\\"}):
         raise ValueError(f"Invalid {field}")
     return value
 
