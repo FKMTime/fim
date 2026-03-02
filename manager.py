@@ -183,6 +183,17 @@ def run_cmd_live(args, cwd=None, timeout=180, stage_idx=0):
     except Exception as e:
         return -1, str(e) + "\n"
 
+def sanitize_wifi_value(value, field, max_len=64):
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise ValueError(f"Invalid {field}")
+    if len(value) > max_len:
+        raise ValueError(f"{field} too long")
+    if any(c in value for c in ("\x00", "\n", "\r", "=")):
+        raise ValueError(f"Invalid {field}")
+    return value
+
 def force_rmtree(path):
     """Remove a directory tree, falling back to docker if not running as root."""
     try:
@@ -1794,6 +1805,8 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/logout":
+            if not self.require_auth():
+                return
             token = get_cookie(self.headers, "session")
             if token and token in _sessions:
                 del _sessions[token]
@@ -1889,10 +1902,14 @@ class Handler(BaseHTTPRequestHandler):
             if not IS_OPENWRT:
                 self.send_json({"ok": False, "error": "WiFi management requires OpenWrt"})
                 return
-            hs_ssid  = body.get("hs_ssid", "")
-            hs_psk   = body.get("hs_psk", "")
-            sta_ssid = body.get("sta_ssid", "")
-            sta_psk  = body.get("sta_psk", "")
+            try:
+                hs_ssid  = sanitize_wifi_value(body.get("hs_ssid", ""), "hs_ssid", max_len=32)
+                hs_psk   = sanitize_wifi_value(body.get("hs_psk", ""), "hs_psk", max_len=63)
+                sta_ssid = sanitize_wifi_value(body.get("sta_ssid", ""), "sta_ssid", max_len=32)
+                sta_psk  = sanitize_wifi_value(body.get("sta_psk", ""), "sta_psk", max_len=63)
+            except ValueError as e:
+                self.send_json({"ok": False, "error": str(e)})
+                return
             if not any([hs_ssid, hs_psk, sta_ssid, sta_psk]):
                 self.send_json({"ok": False, "error": "Nothing to set"})
                 return
