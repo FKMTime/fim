@@ -1,0 +1,9 @@
+instances/
+auth.json
+.instance_selected
+*.tar.gz
+compose.yml
+.git/
+__pycache__/
+*.pyc
+tests/

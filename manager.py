@@ -10,10 +10,11 @@ from urllib.parse import urlparse, parse_qs
 # ── Config ─────────────────────────────────────────────────────────────────
 
 SCRIPT_DIR    = os.path.dirname(os.path.abspath(__file__))
-INSTANCES_DIR = os.path.join(SCRIPT_DIR, "instances")
+DATA_DIR      = os.environ.get("FIM_DATA_DIR", SCRIPT_DIR)
+INSTANCES_DIR = os.path.join(DATA_DIR, "instances")
 TEMPLATES_DIR = os.path.join(SCRIPT_DIR, "templates")
-LOCK_FILE     = os.path.join(SCRIPT_DIR, ".instance_selected")
-AUTH_FILE     = os.path.join(SCRIPT_DIR, "auth.json")
+LOCK_FILE     = os.path.join(DATA_DIR, ".instance_selected")
+AUTH_FILE     = os.path.join(DATA_DIR, "auth.json")
 PORT_MAIN     = 8181
 PORT_ALT      = 80
 IS_OPENWRT    = os.path.isfile("/etc/openwrt_release")
@@ -666,7 +667,7 @@ def _do_backup_async(name):
 
         progress_stage(si, "running")
         safe_name = os.path.basename(name)
-        tar_path = os.path.join(SCRIPT_DIR, f"{safe_name}.tar.gz")
+        tar_path = os.path.join(DATA_DIR, f"{safe_name}.tar.gz")
         try:
             progress_stage(si, "running", f"Creating {name}.tar.gz …")
             with tarfile.open(tar_path, "w:gz") as tar:
@@ -1936,6 +1937,7 @@ if __name__ == "__main__":
     main_server = ThreadingHTTPServer(("0.0.0.0", PORT_MAIN), Handler)
     threading.Thread(target=main_server.serve_forever, daemon=True).start()
     print(f"FKMTime Instance Manager running on http://0.0.0.0:{PORT_MAIN}")
+    print(f"Data directory: {DATA_DIR}")
     print(f"Instances directory: {INSTANCES_DIR}")
     print(f"Templates: {list(get_templates().keys())}")
     print(f"Selected instance: {get_selected() or 'none'}")

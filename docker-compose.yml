@@ -1,0 +1,11 @@
+services:
+  fim:
+    build: .
+    ports:
+      - "8181:8181"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${FIM_DATA_DIR:-/opt/fim}:${FIM_DATA_DIR:-/opt/fim}
+    environment:
+      - FIM_DATA_DIR=${FIM_DATA_DIR:-/opt/fim}
+    restart: unless-stopped
