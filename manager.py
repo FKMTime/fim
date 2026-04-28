@@ -2,7 +2,8 @@
 
 """FKMTime Instance Manager - Port 8181 (+ dynamic port 80) - DYNAMIC INSTANCES"""
 
-import os, json, subprocess, threading, hashlib, secrets, time, shutil, tarfile
+import os, sys, platform, json, subprocess, threading, hashlib, secrets, time, shutil, tarfile
+import urllib.request
 
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
@@ -17,8 +18,10 @@ LOCK_FILE     = os.path.join(DATA_DIR, ".instance_selected")
 AUTH_FILE     = os.path.join(DATA_DIR, "auth.json")
 PORT_MAIN     = 8181
 PORT_ALT      = 80
-IS_OPENWRT    = os.path.isfile("/etc/openwrt_release")
-IS_ROOT       = os.geteuid() == 0
+IS_OPENWRT       = os.path.isfile("/etc/openwrt_release")
+IS_ROOT          = os.geteuid() == 0
+IS_MACOS         = sys.platform == "darwin"
+IS_APPLE_SILICON = IS_MACOS  # universal binary supports both Intel and Apple Silicon
 
 def get_templates():
     """Scan templates directory and return {name: path} for each subdirectory."""
@@ -689,6 +692,161 @@ def _do_backup_async(name):
 
         progress_done(ok=True)
 
+# ── Adapter manager (Apple Silicon only) ────────────────────────────────────
+
+ADAPTER_ENABLED_FILE = os.path.join(DATA_DIR, ".adapter_enabled")
+ADAPTER_BIN          = os.path.join(DATA_DIR, "docker-adapter")
+ADAPTER_DOWNLOAD_URL = (
+    "https://github.com/filipton/docker-adapter/releases/latest"
+    "/download/docker-adapter-apple-darwin"
+)
+ADAPTER_LOG_MAX = 300
+
+_adapter_lock   = threading.Lock()
+_adapter_proc   = None
+_adapter_stop   = threading.Event()
+_adapter_thread = None
+_adapter_state  = {
+    "enabled":     False,
+    "running":     False,
+    "downloading": False,
+    "pid":         None,
+    "log":         [],
+    "error":       "",
+}
+
+def _adapter_log(line):
+    with _adapter_lock:
+        _adapter_state["log"].append(line)
+        if len(_adapter_state["log"]) > ADAPTER_LOG_MAX:
+            _adapter_state["log"] = _adapter_state["log"][-ADAPTER_LOG_MAX:]
+
+def is_adapter_enabled():
+    return os.path.isfile(ADAPTER_ENABLED_FILE)
+
+def set_adapter_enabled_flag(enabled):
+    if enabled:
+        with open(ADAPTER_ENABLED_FILE, "w") as f:
+            f.write("1")
+    else:
+        try:
+            os.unlink(ADAPTER_ENABLED_FILE)
+        except FileNotFoundError:
+            pass
+
+def _download_adapter():
+    _adapter_log("Downloading mdns-docker-adapter from GitHub…")
+    try:
+        tmp = ADAPTER_BIN + ".tmp"
+        urllib.request.urlretrieve(ADAPTER_DOWNLOAD_URL, tmp)
+        os.chmod(tmp, 0o755)
+        os.replace(tmp, ADAPTER_BIN)
+        _adapter_log("Download complete.")
+        return True
+    except Exception as e:
+        _adapter_log(f"Download failed: {e}")
+        return False
+
+def _adapter_manager():
+    global _adapter_proc
+    if not os.path.isfile(ADAPTER_BIN):
+        with _adapter_lock:
+            _adapter_state["downloading"] = True
+        ok = _download_adapter()
+        with _adapter_lock:
+            _adapter_state["downloading"] = False
+        if not ok:
+            with _adapter_lock:
+                _adapter_state["error"] = "Binary download failed"
+            return
+
+    while not _adapter_stop.is_set():
+        try:
+            _adapter_log("Starting mdns-docker-adapter…")
+            proc = subprocess.Popen(
+                [ADAPTER_BIN],
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, bufsize=1,
+            )
+            with _adapter_lock:
+                _adapter_proc             = proc
+                _adapter_state["running"] = True
+                _adapter_state["pid"]     = proc.pid
+                _adapter_state["error"]   = ""
+
+            for line in proc.stdout:
+                _adapter_log(line.rstrip("\n"))
+                if _adapter_stop.is_set():
+                    break
+
+            proc.wait()
+            exit_code = proc.returncode
+            with _adapter_lock:
+                _adapter_state["running"] = False
+                _adapter_state["pid"]     = None
+                _adapter_proc             = None
+
+            if _adapter_stop.is_set():
+                break
+
+            _adapter_log(f"Adapter exited (code {exit_code}), restarting in 3 s…")
+            _adapter_stop.wait(3)
+
+        except Exception as e:
+            _adapter_log(f"Adapter error: {e}")
+            with _adapter_lock:
+                _adapter_state["running"] = False
+                _adapter_state["pid"]     = None
+                _adapter_proc             = None
+            if _adapter_stop.is_set():
+                break
+            _adapter_stop.wait(3)
+
+def start_adapter():
+    global _adapter_thread
+    if not IS_APPLE_SILICON:
+        return
+    if _adapter_thread and _adapter_thread.is_alive():
+        return
+    _adapter_stop.clear()
+    with _adapter_lock:
+        _adapter_state["enabled"] = True
+        _adapter_state["log"]     = []
+        _adapter_state["error"]   = ""
+    _adapter_thread = threading.Thread(target=_adapter_manager, daemon=True)
+    _adapter_thread.start()
+
+def stop_adapter():
+    if not IS_APPLE_SILICON:
+        return
+    _adapter_stop.set()
+    with _adapter_lock:
+        _adapter_state["enabled"] = False
+        proc = _adapter_proc
+    if proc:
+        try:
+            proc.terminate()
+            proc.wait(timeout=5)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+    with _adapter_lock:
+        _adapter_state["running"] = False
+        _adapter_state["pid"]     = None
+
+def get_adapter_state():
+    with _adapter_lock:
+        return {
+            "enabled":     _adapter_state["enabled"],
+            "running":     _adapter_state["running"],
+            "downloading": _adapter_state["downloading"],
+            "pid":         _adapter_state["pid"],
+            "log":         "\n".join(_adapter_state["log"]),
+            "error":       _adapter_state["error"],
+        }
+
 # ── Dynamic port 80 manager ─────────────────────────────────────────────────
 
 _port80_server   = None
@@ -1008,6 +1166,7 @@ MAIN_HTML = r"""<!DOCTYPE html>
     <div class="tab" onclick="switchTab('env')">Env Editor</div>
     <div class="tab" onclick="switchTab('compose')">Compose</div>
     <div class="tab" id="tab-wifi-btn" onclick="switchTab('wifi')">WiFi</div>
+    <div class="tab" id="tab-adapter-btn" onclick="switchTab('adapter')">Adapter</div>
   </div>
   <div class="panel active" id="tab-control">
     <div class="card">
@@ -1073,6 +1232,31 @@ MAIN_HTML = r"""<!DOCTYPE html>
       </div>
     </div>
   </div>
+  <div class="panel" id="tab-adapter">
+    <div class="card">
+      <h2>mdns-docker-adapter</h2>
+      <p style="font-size:.82rem;color:#666;margin-bottom:16px">
+        Provides Bluetooth and mDNS support for Docker containers on Apple Silicon.<br>
+        The binary is downloaded automatically and restarted if it crashes.
+        <a href="https://github.com/filipton/docker-adapter/releases/latest" target="_blank" style="color:#60aaff">GitHub ↗</a>
+      </p>
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:18px">
+        <span id="adapter-status-badge" class="badge badge-down">DISABLED</span>
+        <span id="adapter-pid" style="font-size:.78rem;color:#555"></span>
+      </div>
+      <div class="row">
+        <button id="adapter-toggle-btn" class="btn-success" onclick="toggleAdapter()">Enable</button>
+      </div>
+      <div id="adapter-download-row" style="display:none;margin-top:14px;font-size:.82rem;color:#60aaff">
+        ⬇ Downloading adapter binary…
+      </div>
+      <div id="adapter-error-row" style="display:none;margin-top:10px;font-size:.82rem;color:#ff7070"></div>
+      <div id="adapter-log-wrap" style="margin-top:18px;display:none">
+        <div class="section-title">Output</div>
+        <div id="adapter-log" class="status-box" style="max-height:280px;min-height:60px"></div>
+      </div>
+    </div>
+  </div>
 </main>
 
 <!-- Collapsible output panel -->
@@ -1087,8 +1271,9 @@ MAIN_HTML = r"""<!DOCTYPE html>
 </div>
 
 <script>
-const ON_PORT80  = (location.port === '' || location.port === '80');
-const IS_OPENWRT = __IS_OPENWRT__;
+const ON_PORT80         = (location.port === '' || location.port === '80');
+const IS_OPENWRT        = __IS_OPENWRT__;
+const IS_APPLE_SILICON  = __IS_APPLE_SILICON__;
 const LS_TAB    = 'fkm_active_tab';
 const LS_LOG    = 'fkm_action_log';
 const LS_STATUS = 'fkm_last_status';
@@ -1154,7 +1339,12 @@ function switchTab(name) {
     showToast('WiFi management is only available on OpenWrt', 'error');
     return;
   }
-  ['control','env','compose','wifi'].forEach((n,i) => {
+  if (name === 'adapter' && !IS_APPLE_SILICON) {
+    showToast('Adapter is only available on Apple Silicon Mac', 'error');
+    return;
+  }
+  if (name !== 'adapter') stopAdapterPolling();
+  ['control','env','compose','wifi','adapter'].forEach((n,i) => {
     document.querySelectorAll('.tab')[i].classList.toggle('active', n===name);
     const panel = document.querySelectorAll('.panel')[i];
     panel.classList.toggle('active', n===name);
@@ -1163,6 +1353,7 @@ function switchTab(name) {
   if (name==='env')     loadEnv();
   if (name==='compose') loadCompose();
   if (name==='wifi')    loadWifi();
+  if (name==='adapter') { loadAdapter(); startAdapterPolling(); }
 }
 
 async function api(path, body=null) {
@@ -1589,16 +1780,96 @@ function closeLogsModal() {
   if (_logsEventSource) { _logsEventSource.close(); _logsEventSource = null; }
 }
 
+// ── Adapter tab JS ─────────────────────────────────────────────────────
+let _adapterPollTimer = null;
+
+async function loadAdapter() {
+  const data = await api('/api/adapter');
+  if (data) applyAdapterState(data);
+}
+
+function applyAdapterState(data) {
+  const badge   = document.getElementById('adapter-status-badge');
+  const btn     = document.getElementById('adapter-toggle-btn');
+  const dlRow   = document.getElementById('adapter-download-row');
+  const errRow  = document.getElementById('adapter-error-row');
+  const logWrap = document.getElementById('adapter-log-wrap');
+  const logEl   = document.getElementById('adapter-log');
+  const pidEl   = document.getElementById('adapter-pid');
+
+  if (data.downloading) {
+    badge.textContent = 'DOWNLOADING';
+    badge.className   = 'badge badge-fkmtest';
+  } else if (data.running) {
+    badge.textContent = 'RUNNING';
+    badge.className   = 'badge badge-ok';
+  } else if (data.enabled) {
+    badge.textContent = 'STARTING';
+    badge.className   = 'badge badge-fkmtest';
+  } else {
+    badge.textContent = 'DISABLED';
+    badge.className   = 'badge badge-down';
+  }
+
+  btn.textContent = data.enabled ? 'Disable' : 'Enable';
+  btn.className   = data.enabled ? 'btn-danger' : 'btn-success';
+
+  dlRow.style.display  = data.downloading ? 'block' : 'none';
+  errRow.style.display = data.error       ? 'block' : 'none';
+  if (data.error) errRow.textContent = '✗ ' + data.error;
+
+  pidEl.textContent = data.pid ? `PID: ${data.pid}` : '';
+
+  if (data.log) {
+    logWrap.style.display = 'block';
+    logEl.textContent = data.log;
+    logEl.scrollTop   = logEl.scrollHeight;
+  } else if (!data.enabled) {
+    logWrap.style.display = 'none';
+  }
+}
+
+async function toggleAdapter() {
+  const btn = document.getElementById('adapter-toggle-btn');
+  btn.disabled = true;
+  const cur = await api('/api/adapter');
+  if (!cur) { btn.disabled = false; return; }
+  const result = await api('/api/adapter/set', {enabled: !cur.enabled});
+  btn.disabled = false;
+  if (!result) return;
+  applyAdapterState(result);
+  if (result.enabled) startAdapterPolling();
+  else stopAdapterPolling();
+}
+
+function startAdapterPolling() {
+  if (_adapterPollTimer) return;
+  _adapterPollTimer = setInterval(async () => {
+    const data = await api('/api/adapter');
+    if (data) applyAdapterState(data);
+  }, 2000);
+}
+
+function stopAdapterPolling() {
+  if (_adapterPollTimer) { clearInterval(_adapterPollTimer); _adapterPollTimer = null; }
+}
+
 // ── Boot: restore saved state then fetch live data ─────────────────────
 (async () => {
   // Disable WiFi tab when not running on OpenWrt
   if (!IS_OPENWRT) {
     document.getElementById('tab-wifi-btn').classList.add('tab-disabled');
   }
+  // Disable Adapter tab when not on Apple Silicon
+  if (!IS_APPLE_SILICON) {
+    document.getElementById('tab-adapter-btn').classList.add('tab-disabled');
+  }
 
-  // Restore saved tab (skip wifi on non-OpenWrt, default to control)
+  // Restore saved tab (skip wifi on non-OpenWrt, adapter on non-Apple-Silicon, default to control)
   const savedTab = lsGet(LS_TAB, 'control');
-  const canRestore = savedTab !== 'control' && (IS_OPENWRT || savedTab !== 'wifi');
+  const canRestore = savedTab !== 'control'
+    && (IS_OPENWRT        || savedTab !== 'wifi')
+    && (IS_APPLE_SILICON  || savedTab !== 'adapter');
   if (canRestore) switchTab(savedTab);
 
   // Restore cached status instantly (prevents blank screen on reload)
@@ -1665,7 +1936,11 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if path in ("/", ""):
             if self.is_auth():
-                self.send_html(MAIN_HTML.replace("__IS_OPENWRT__", json.dumps(IS_OPENWRT)))
+                self.send_html(
+                    MAIN_HTML
+                    .replace("__IS_OPENWRT__", json.dumps(IS_OPENWRT))
+                    .replace("__IS_APPLE_SILICON__", json.dumps(IS_APPLE_SILICON))
+                )
             else:
                 self.send_html(LOGIN_HTML)
             return
@@ -1723,6 +1998,11 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(get_progress())
         elif path == "/api/templates":
             self.send_json({"templates": list(get_templates().keys())})
+        elif path == "/api/adapter":
+            if not IS_APPLE_SILICON:
+                self.send_json({"ok": False, "error": "Only available on Apple Silicon Mac"})
+                return
+            self.send_json(get_adapter_state())
         elif path == "/api/logs":
             qs = parse_qs(urlparse(self.path).query)
             name = qs.get("name", [""])[0]
@@ -1888,6 +2168,19 @@ class Handler(BaseHTTPRequestHandler):
             _action_lock.release()
             threading.Thread(target=_do_delete_async, args=(name,), daemon=True).start()
             self.send_json({"ok": True})
+        elif path == "/api/adapter/set":
+            if not IS_APPLE_SILICON:
+                self.send_json({"ok": False, "error": "Only available on Apple Silicon Mac"})
+                return
+            enabled = bool(body.get("enabled", False))
+            set_adapter_enabled_flag(enabled)
+            if enabled:
+                start_adapter()
+            else:
+                stop_adapter()
+            state = get_adapter_state()
+            state["ok"] = True
+            self.send_json(state)
         elif path == "/api/instance/backup":
             name = body.get("name", "").strip()
             if not name or name not in get_instances():
@@ -1945,6 +2238,16 @@ if __name__ == "__main__":
     print(f"Running as root: {IS_ROOT}")
     if not IS_ROOT:
         print("Port 80 listener disabled (not running as root)")
+    if IS_APPLE_SILICON:
+        if is_adapter_enabled():
+            print("Starting mdns-docker-adapter (enabled)…")
+            start_adapter()
+        else:
+            print("\033[33mTip: open the Adapter tab in the web UI to enable mdns-docker-adapter\033[0m")
+            print("\033[33m  (Bluetooth and mDNS support for Docker containers)\033[0m")
+    elif IS_MACOS:
+        print("\033[33mTip: on macOS you can run mdns-docker-adapter for Bluetooth and mDNS support:\033[0m")
+        print("\033[33m  https://github.com/filipton/docker-adapter/releases/latest\033[0m")
 
     threading.Thread(target=_port80_monitor, daemon=True).start()
     _update_port80()

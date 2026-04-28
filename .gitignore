@@ -2,3 +2,5 @@ __pycache__/
 auth.json
 instances/
 .instance_selected
+.adapter_enabled
+docker-adapter

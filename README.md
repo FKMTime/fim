@@ -9,6 +9,14 @@ python3 manager.py
 
 Serves on `http://0.0.0.0:8181`. Default credentials: `root` / `root`.
 
+### macOS
+
+On macOS it is recommended to run the manager **natively** (not in Docker). 
+Running natively gives Docker containers access to the host's Bluetooth and mDNS stack 
+via [mdns-docker-adapter](https://github.com/filipton/docker-adapter/releases/latest).
+
+Once the manager is running, open the **Adapter** tab in the web UI to download and enable `docker-adapter` with one click.
+
 ## Running in Docker
 
 The manager needs the Docker socket so it can run `docker compose` commands on the host.

@@ -7,3 +7,5 @@ compose.yml
 __pycache__/
 *.pyc
 tests/
+.adapter_enabled
+docker-adapter
