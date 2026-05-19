@@ -14,7 +14,8 @@ RUN apt-get update \
 
 WORKDIR /app
 COPY manager.py .
-COPY templates/ templates/
+COPY fim/ fim/
+COPY templates/ templates/   # instance templates (dev/prod)
 
 ENV FIM_DATA_DIR=/opt/fim
 

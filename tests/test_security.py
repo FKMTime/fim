@@ -1,6 +1,6 @@
 import unittest
 
-from manager import sanitize_wifi_value
+from fim.docker import sanitize_wifi_value
 
 
 class WifiSanitizationTests(unittest.TestCase):

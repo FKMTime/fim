@@ -1,0 +1,1129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FKMTime Instance Manager</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Segoe UI',sans-serif;background:#0f1117;color:#e0e0e0;min-height:100vh}
+  header{background:#1a1d27;border-bottom:1px solid #2a2d3a;padding:14px 24px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+  header h1{font-size:1.2rem;font-weight:600;letter-spacing:.5px;color:#fff}
+  .badge{padding:4px 12px;border-radius:20px;font-size:.75rem;font-weight:700;letter-spacing:.5px;transition:all .3s ease}
+  .badge-fkmtest{background:#1a3a5c;color:#60aaff}
+  .badge-prod{background:#3a1a1a;color:#ff6060}
+  .badge-ok{background:#1a3a1a;color:#60ff90}
+  .badge-down{background:#2a2a2a;color:#999}
+  main{max-width:960px;margin:0 auto;padding:24px 16px}
+  .tabs{display:flex;gap:4px;margin-bottom:20px;border-bottom:1px solid #2a2d3a}
+  .tab{padding:10px 20px;cursor:pointer;border-radius:8px 8px 0 0;font-size:.9rem;background:#1a1d27;color:#888;border:1px solid #2a2d3a;border-bottom:none;transition:all .2s}
+  .tab.active{background:#22253a;color:#fff;border-color:#3a3d5a}
+  .tab:hover:not(.active):not(.tab-disabled){color:#ccc}
+  .tab.tab-disabled{color:#555;cursor:not-allowed;opacity:.5}
+  .panel{display:none;animation:fadeIn .25s ease}.panel.active{display:block}
+  @keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+  .card{background:#1a1d27;border:1px solid #2a2d3a;border-radius:10px;padding:20px;margin-bottom:16px}
+  .card h2{font-size:1rem;font-weight:600;margin-bottom:14px;color:#aab}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+  button{padding:8px 18px;border:none;border-radius:6px;cursor:pointer;font-size:.85rem;font-weight:600;transition:all .2s}
+  .btn-primary{background:#2a5caa;color:#fff}.btn-primary:hover{background:#3a6cba}
+  .btn-danger{background:#aa2a2a;color:#fff}.btn-danger:hover{background:#ba3a3a}
+  .btn-success{background:#2a7a2a;color:#fff}.btn-success:hover{background:#3a8a3a}
+  .btn-warn{background:#8a6a00;color:#fff}.btn-warn:hover{background:#aa8000}
+  .btn-neutral{background:#2a2d3a;color:#ccc}.btn-neutral:hover{background:#3a3d4a}
+  button:disabled{opacity:.4;cursor:not-allowed}
+  button .spinner{display:inline-block;width:12px;height:12px;border:2px solid transparent;border-top-color:currentColor;border-radius:50%;animation:spin .6s linear infinite;margin-right:6px;vertical-align:middle}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  textarea{width:100%;background:#0f1117;color:#d0e0d0;border:1px solid #2a2d3a;border-radius:6px;padding:10px;font-family:'Courier New',monospace;font-size:.82rem;resize:vertical;line-height:1.5}
+  .status-box{background:#0f1117;border:1px solid #2a2d3a;border-radius:6px;padding:12px;font-family:'Courier New',monospace;font-size:.8rem;white-space:pre-wrap;max-height:180px;overflow-y:auto;color:#90c090;transition:color .3s ease}
+  .status-box.err{color:#c09090}
+  input[type=text],input[type=password],select{background:#0f1117;color:#e0e0e0;border:1px solid #2a2d3a;border-radius:6px;padding:8px 10px;font-size:.85rem;width:100%}
+  label{font-size:.85rem;color:#888;margin-bottom:4px;display:block}
+  .field{margin-bottom:12px}
+  .split{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:600px){.split{grid-template-columns:1fr}}
+  .instance-list{display:flex;flex-direction:column;gap:6px}
+  .instance-row{display:flex;align-items:center;gap:12px;padding:10px 14px;background:#1a1d27;border:1px solid #2a2d3a;border-radius:8px;border-left:4px solid #333;transition:border-color .3s ease}
+  .instance-row.animate-in{animation:rowIn .3s ease both}
+  @keyframes rowIn{from{opacity:0;transform:translateX(-6px)}to{opacity:1;transform:translateX(0)}}
+  .instance-row.selected{border-left-color:#60aaff}
+  .instance-row.selected.prod{border-left-color:#ff6060}
+  .instance-row .inst-name{font-weight:600;font-size:.9rem;min-width:80px}
+  .instance-row .inst-actions{display:flex;gap:6px;margin-left:auto;flex-wrap:wrap}
+  .instance-row .inst-actions button{padding:6px 12px;font-size:.78rem;white-space:nowrap}
+  .section-title{font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#555;margin-bottom:10px}
+  .progress-modal-overlay{display:none;position:fixed;inset:0;background:#000b;z-index:150;align-items:center;justify-content:center;opacity:0;transition:opacity .2s ease}
+  .progress-modal-overlay.show{display:flex;opacity:1}
+  .progress-modal{background:#1a1d27;border:1px solid #2a2d3a;border-radius:12px;padding:28px;max-width:480px;width:90%;box-shadow:0 8px 40px #0009;transform:scale(.95);transition:transform .2s ease}
+  .progress-modal-overlay.show .progress-modal{transform:scale(1)}
+  .progress-modal h3{font-size:1rem;font-weight:600;color:#fff;margin-bottom:16px}
+  .progress-stages{display:flex;flex-direction:column;gap:8px;margin-bottom:10px}
+  .stage-row{display:flex;align-items:center;gap:10px;font-size:.85rem}
+  .stage-icon{width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.75rem;flex-shrink:0;transition:all .3s;font-weight:700}
+  .stage-icon.pending{background:#2a2d3a;color:#555}
+  .stage-icon.running{background:#1a3a5c;color:#60aaff;animation:pulse 1s ease-in-out infinite}
+  .stage-icon.done{background:#1a3a1a;color:#60ff90}
+  .stage-icon.error{background:#3a1a1a;color:#ff6060}
+  .stage-label{color:#ccc}
+  .stage-label.running{color:#60aaff;font-weight:600}
+  .stage-label.done{color:#777}
+  .stage-label.error{color:#ff6060;font-weight:600}
+  .progress-track{height:5px;background:#2a2d3a;border-radius:3px;overflow:hidden;margin-bottom:12px}
+  .progress-fill{height:100%;background:linear-gradient(90deg,#2a5caa,#60aaff);border-radius:3px;transition:width .5s ease;width:0%}
+  @keyframes pulse{0%,100%{box-shadow:0 0 0 0 #2a5caa88}50%{box-shadow:0 0 0 6px #2a5caa00}}
+  .output-panel{position:fixed;bottom:0;left:0;right:0;z-index:50;background:#131620;border-top:1px solid #2a2d3a;transition:transform .3s ease;transform:translateY(100%)}
+  .output-panel.show{transform:translateY(0)}
+  .output-panel-header{display:flex;align-items:center;padding:8px 16px;cursor:pointer;gap:10px;user-select:none}
+  .output-panel-header span{font-size:.8rem;font-weight:600;color:#888}
+  .output-panel-header .chevron{transition:transform .2s;color:#666}
+  .output-panel-header .chevron.up{transform:rotate(180deg)}
+  .output-panel-body{max-height:220px;overflow-y:auto;padding:0 16px 12px;font-family:'Courier New',monospace;font-size:.78rem;white-space:pre;color:#b0c0a0;transition:max-height .3s ease}
+  .output-panel-body.collapsed{max-height:0;padding-bottom:0;overflow:hidden}
+  .modal-overlay{display:none;position:fixed;inset:0;background:#000b;z-index:100;align-items:center;justify-content:center;opacity:0;transition:opacity .2s ease}
+  .modal-overlay.show{display:flex;opacity:1}
+  .modal{background:#1a1d27;border:1px solid #3a2020;border-radius:12px;padding:28px;max-width:420px;width:90%;box-shadow:0 8px 40px #0009;transform:scale(.95);transition:transform .2s ease}
+  .modal-overlay.show .modal{transform:scale(1)}
+  .modal h3{font-size:1rem;color:#ff9090;margin-bottom:10px}
+  .modal p{font-size:.85rem;color:#aaa;margin-bottom:18px;line-height:1.6}
+  .modal .row{margin-bottom:0}
+  .modal-input-wrap{margin-bottom:16px}
+  .modal-input-wrap input,.modal-input-wrap select{border-color:#3a2020;width:100%;background:#0f1117;color:#e0e0e0;border:1px solid #2a2d3a;border-radius:6px;padding:9px 11px}
+  .redirect-banner{display:none;position:fixed;top:0;left:0;right:0;z-index:200;
+    background:#2a5caa;color:#fff;text-align:center;padding:12px;font-size:.9rem;font-weight:600}
+  .toast-container{position:fixed;top:16px;right:16px;z-index:300;display:flex;flex-direction:column;gap:8px;pointer-events:none}
+  .toast{pointer-events:auto;padding:10px 18px;border-radius:8px;font-size:.85rem;font-weight:600;color:#fff;box-shadow:0 4px 20px #0006;animation:toastIn .3s ease forwards,toastOut .3s ease forwards;animation-delay:0s,3s;opacity:0}
+  .toast-success{background:#1a5a2a}
+  .toast-error{background:#7a2020}
+  .toast-info{background:#1a3a6a}
+  @keyframes toastIn{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:translateX(0)}}
+  @keyframes toastOut{from{opacity:1;transform:translateX(0)}to{opacity:0;transform:translateX(20px)}}
+  .logs-modal-overlay{display:none;position:fixed;inset:0;background:#000d;z-index:200;flex-direction:column;opacity:0;transition:opacity .2s ease}
+  .logs-modal-overlay.show{display:flex;opacity:1}
+  .logs-modal-header{display:flex;align-items:center;padding:14px 20px;background:#1a1d27;border-bottom:1px solid #2a2d3a;gap:12px}
+  .logs-modal-header h3{font-size:1rem;font-weight:600;color:#fff;flex:1;margin:0}
+  .logs-modal-body{flex:1;overflow-y:auto;padding:12px 16px;font-family:'Courier New',monospace;font-size:.78rem;white-space:pre-wrap;word-break:break-word;color:#b0c0a0;background:#0a0c10;line-height:1.6}
+</style>
+</head>
+<body>
+<div class="redirect-banner" id="redirect-banner">
+  Redirecting to port 8181…
+</div>
+<div class="toast-container" id="toast-container"></div>
+<header>
+  <h1>🐳 FKMTime Instance Manager</h1>
+  <span id="hdr-selected" class="badge">…</span>
+  <span id="hdr-status" class="badge badge-down">…</span>
+  <span style="flex:1"></span>
+  <button class="btn-neutral" style="padding:6px 12px;font-size:.8rem" onclick="refreshAll()">↻ Refresh</button>
+  <button class="btn-neutral" style="padding:6px 12px;font-size:.8rem" onclick="logout()">Sign Out</button>
+</header>
+
+<!-- Volumes modal (selected only) -->
+<div id="modal-overlay" class="modal-overlay">
+  <div class="modal">
+    <h3>⚠ Delete All Volume Data?</h3>
+    <p>This will run <code>docker compose down --volumes</code> on the selected instance, permanently destroying all container volumes.<br><br>Type <strong style="color:#ff9090">DELETE</strong> to confirm.</p>
+    <div class="modal-input-wrap">
+      <input type="text" id="modal-confirm-input" placeholder="Type DELETE here…" oninput="checkModalInput()">
+    </div>
+    <div class="row">
+      <button class="btn-danger" id="modal-ok-btn" onclick="confirmDownVolumes()" disabled>Delete Everything</button>
+      <button class="btn-neutral" onclick="closeModal()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Create modal -->
+<div id="create-modal-overlay" class="modal-overlay">
+  <div class="modal">
+    <h3>➕ Create New Instance</h3>
+    <div class="modal-input-wrap">
+      <label>Template</label>
+      <select id="create-template">
+      </select>
+    </div>
+    <div class="modal-input-wrap">
+      <label>Instance Name</label>
+      <input type="text" id="create-name" placeholder="e.g. dev-v2, staging" oninput="checkCreateReady()">
+    </div>
+    <div class="row">
+      <button class="btn-success" id="create-ok-btn" onclick="confirmCreate()" disabled>Create Instance</button>
+      <button class="btn-neutral" onclick="closeCreateModal()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Delete modal -->
+<div id="delete-modal-overlay" class="modal-overlay">
+  <div class="modal">
+    <h3>🗑 Delete Instance <span id="delete-instance-name" style="color:#ff6060"></span></h3>
+    <p>This will run <code>docker compose down --volumes</code> and then permanently remove the entire instance folder.<br><br>Type <strong style="color:#ff9090">DELETE</strong> to confirm.</p>
+    <div class="modal-input-wrap">
+      <input type="text" id="delete-confirm-input" placeholder="Type DELETE here…" oninput="checkDeleteInput()">
+    </div>
+    <div class="row">
+      <button class="btn-danger" id="delete-ok-btn" onclick="confirmDeleteInstance()" disabled>Delete Instance</button>
+      <button class="btn-neutral" onclick="closeDeleteModal()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Pull modal -->
+<div id="pull-modal-overlay" class="modal-overlay">
+  <div class="modal">
+    <h3 style="color:#60aaff">⬇ Pull Images</h3>
+    <p>Do you want to start containers (<code>docker compose up -d</code>) after pulling?</p>
+    <div class="row">
+      <button class="btn-success" onclick="confirmPull(true)">Pull &amp; Start</button>
+      <button class="btn-neutral" onclick="confirmPull(false)">Pull Only</button>
+      <button class="btn-neutral" onclick="closePullModal()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Compose save confirm modal -->
+<div id="compose-save-modal-overlay" class="modal-overlay">
+  <div class="modal">
+    <h3 style="color:#ffaa60">📝 Save docker-compose.yml?</h3>
+    <p>This will overwrite the current <code>docker-compose.yml</code>.<br><br>If the instance is running, it will be stopped and restarted to apply the changes.</p>
+    <div class="row">
+      <button class="btn-success" onclick="confirmComposeSave()">Save &amp; Apply</button>
+      <button class="btn-neutral" onclick="closeComposeSaveModal()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Backup confirm modal -->
+<div id="backup-modal-overlay" class="modal-overlay">
+  <div class="modal">
+    <h3 style="color:#60aaff">📦 Backup Instance <span id="backup-instance-name" style="color:#60aaff"></span></h3>
+    <p>This will create a <code>.tar.gz</code> archive of the entire instance directory and download it.<br><br>If the instance is running, it will be <strong>stopped</strong> during the backup and then <strong>restarted</strong> automatically.</p>
+    <div class="row">
+      <button class="btn-primary" onclick="confirmBackup()">Backup &amp; Download</button>
+      <button class="btn-neutral" onclick="closeBackupModal()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Progress modal overlay -->
+<div id="progress-modal-overlay" class="progress-modal-overlay">
+  <div class="progress-modal">
+    <h3 id="progress-modal-title">⏳ Action in progress…</h3>
+    <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
+    <div class="progress-stages" id="progress-stages"></div>
+  </div>
+</div>
+
+<!-- Logs modal (full-screen) -->
+<div id="logs-modal-overlay" class="logs-modal-overlay">
+  <div class="logs-modal-header">
+    <h3>📋 Logs — <span id="logs-instance-name">…</span></h3>
+    <button class="btn-neutral" style="padding:6px 14px;font-size:.82rem" onclick="closeLogsModal()">✕ Close</button>
+  </div>
+  <div class="logs-modal-body" id="logs-body"></div>
+</div>
+
+<main>
+  <div class="tabs">
+    <div class="tab active" onclick="switchTab('control')">Control</div>
+    <div class="tab" onclick="switchTab('env')">Env Editor</div>
+    <div class="tab" onclick="switchTab('compose')">Compose</div>
+    <div class="tab" id="tab-wifi-btn" onclick="switchTab('wifi')">WiFi</div>
+    <div class="tab" id="tab-adapter-btn" onclick="switchTab('adapter')">Adapter</div>
+  </div>
+  <div class="panel active" id="tab-control">
+    <div class="card">
+      <h2>Instances <span id="action-selected" style="color:#666;font-weight:400;font-size:.85rem">— loading…</span></h2>
+      <div class="row" style="justify-content:flex-end;margin-bottom:12px">
+        <button class="btn-neutral" onclick="showCreateModal()">+ New Instance</button>
+      </div>
+      <div id="instances-container" class="instance-list"></div>
+    </div>
+  </div>
+  <div class="panel" id="tab-env">
+    <div class="card">
+      <h2>Env Editor — <span id="env-instance-label" style="color:#888">…</span></h2>
+      <div class="section-title">Template (.env.template)</div>
+      <textarea id="env-template" rows="12" readonly style="opacity:.7;margin-bottom:14px"></textarea>
+      <div class="section-title">Current .env</div>
+      <textarea id="env-content" rows="14" placeholder="# .env is empty or missing"></textarea>
+      <div class="row" style="margin-top:10px">
+        <button class="btn-success" onclick="saveEnv()">💾 Save .env</button>
+        <button class="btn-neutral" onclick="loadEnv()">↻ Reload</button>
+        <span id="env-save-msg" style="font-size:.82rem"></span>
+      </div>
+    </div>
+  </div>
+  <div class="panel" id="tab-compose">
+    <div class="card">
+      <h2>Compose Editor — <span id="compose-instance-label" style="color:#888">…</span></h2>
+      <div class="section-title">docker-compose.yml</div>
+      <textarea id="compose-content" rows="20" placeholder="# docker-compose.yml is empty or missing"></textarea>
+      <div class="row" style="margin-top:10px">
+        <button class="btn-success" onclick="showComposeSaveModal()">💾 Save docker-compose.yml</button>
+        <button class="btn-neutral" onclick="loadCompose()">↻ Reload</button>
+        <span id="compose-save-msg" style="font-size:.82rem"></span>
+      </div>
+    </div>
+  </div>
+  <div class="panel" id="tab-wifi">
+    <div class="card">
+      <h2>WiFi Configuration</h2>
+      <div class="section-title">Current IP Addresses</div>
+      <div style="display:flex;gap:24px;flex-wrap:wrap;margin-bottom:18px;font-size:.88rem">
+        <div><strong>LAN:</strong> <span id="ip-lan" style="color:#888">—</span></div>
+        <div><strong>WAN:</strong> <span id="ip-wan" style="color:#888">—</span></div>
+        <div><strong>WAN WiFi:</strong> <span id="ip-wan-wifi" style="color:#888">—</span></div>
+      </div>
+      <p style="font-size:.82rem;color:#666;margin-bottom:16px">Changes apply via <code>uci</code> and will restart the current compose (if running).</p>
+      <div class="split">
+        <div>
+          <div class="section-title">Hotspot (AP) — radio1 / radio2</div>
+          <div class="field"><label>SSID</label><input type="text" id="hs-ssid" placeholder="loading…"></div>
+          <div class="field"><label>Password</label><input type="text" id="hs-psk" placeholder="loading…"></div>
+        </div>
+        <div>
+          <div class="section-title">Uplink WiFi (STA) — radio0</div>
+          <div class="field"><label>SSID</label><input type="text" id="sta-ssid" placeholder="loading…"></div>
+          <div class="field"><label>Password</label><input type="text" id="sta-psk" placeholder="loading…"></div>
+        </div>
+      </div>
+      <div class="row" style="margin-top:6px">
+        <button class="btn-primary" onclick="applyWifi()">Apply WiFi Settings</button>
+        <button class="btn-neutral" onclick="loadWifi()">↻ Reload Current</button>
+        <span id="wifi-msg" style="font-size:.82rem"></span>
+      </div>
+    </div>
+  </div>
+  <div class="panel" id="tab-adapter">
+    <div class="card">
+      <h2>mdns-docker-adapter</h2>
+      <p style="font-size:.82rem;color:#666;margin-bottom:16px">
+        Provides Bluetooth and mDNS support for Docker containers on Apple Silicon.<br>
+        The binary is downloaded automatically and restarted if it crashes.
+        <a href="https://github.com/filipton/docker-adapter/releases/latest" target="_blank" style="color:#60aaff">GitHub ↗</a>
+      </p>
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:18px">
+        <span id="adapter-status-badge" class="badge badge-down">DISABLED</span>
+        <span id="adapter-pid" style="font-size:.78rem;color:#555"></span>
+      </div>
+      <div class="row">
+        <button id="adapter-toggle-btn" class="btn-success" onclick="toggleAdapter()">Enable</button>
+      </div>
+      <div id="adapter-download-row" style="display:none;margin-top:14px;font-size:.82rem;color:#60aaff">
+        ⬇ Downloading adapter binary…
+      </div>
+      <div id="adapter-error-row" style="display:none;margin-top:10px;font-size:.82rem;color:#ff7070"></div>
+      <div id="adapter-log-wrap" style="margin-top:18px;display:none">
+        <div class="section-title">Output</div>
+        <div id="adapter-log" class="status-box" style="max-height:280px;min-height:60px"></div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<!-- Collapsible output panel -->
+<div id="output-panel" class="output-panel">
+  <div class="output-panel-header" onclick="toggleOutputPanel()">
+    <span>📋 Command Output</span>
+    <span class="chevron" id="output-chevron">▲</span>
+    <span style="flex:1"></span>
+    <button class="btn-neutral" style="padding:3px 10px;font-size:.72rem" onclick="event.stopPropagation();clearOutput()">Clear</button>
+  </div>
+  <div class="output-panel-body" id="output-body"></div>
+</div>
+
+<script>
+const ON_PORT80         = (location.port === '' || location.port === '80');
+const IS_OPENWRT        = __IS_OPENWRT__;
+const IS_APPLE_SILICON  = __IS_APPLE_SILICON__;
+const LS_TAB    = 'fkm_active_tab';
+const LS_LOG    = 'fkm_action_log';
+const LS_STATUS = 'fkm_last_status';
+let currentSelected = null;
+let selectedRunning  = false;
+let _busy            = false;
+let _pollTimer       = null;
+let _busyButtons     = new Set();
+let _firstRender     = true;
+
+let _outputCollapsed = false;
+const LOG_MAX_LINES = 4000;
+
+// Strip ANSI/OSC sequences and apply \\r / \\b so in-place progress renders as plain text.
+function renderTerminalOutput(raw) {
+  if (!raw) return '';
+  let s = raw.replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, '');
+  s = s.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '');
+  s = s.replace(/\x1b[@-_]/g, '');
+  const lines = [];
+  let cur = '';
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (c === '\r') {
+      if (s[i + 1] === '\n') {
+        lines.push(cur);
+        cur = '';
+        i++;
+      } else {
+        cur = '';
+      }
+    } else if (c === '\n') {
+      lines.push(cur);
+      cur = '';
+    } else if (c === '\b') {
+      cur = cur.slice(0, -1);
+    } else if (c !== '\x07') {
+      cur += c;
+    }
+  }
+  if (cur) lines.push(cur);
+  return lines.join('\n');
+}
+
+function trimLogLines(text, maxLines) {
+  if (!text) return '';
+  const lines = text.split('\n');
+  if (lines.length <= maxLines) return text;
+  return lines.slice(lines.length - maxLines).join('\n');
+}
+
+function escapeHtml(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+const ANSI_FG = {
+  30:'#9aa0a6', 31:'#ff6b6b', 32:'#69db69', 33:'#ffd43b', 34:'#74c0fc', 35:'#da77f2', 36:'#3bc9db', 37:'#e0e0e0',
+  90:'#6b7280', 91:'#ff8787', 92:'#8ce99a', 93:'#ffe066', 94:'#91a7ff', 95:'#e599f7', 96:'#66d9e8', 97:'#ffffff',
+};
+
+function xterm256(n) {
+  if (n < 16) {
+    return ['#000','#cd3131','#0dbc79','#e5e510','#2472c8','#bc3fbc','#11a8cd','#e5e5e5',
+            '#666','#f14c4c','#23d18b','#f5f543','#3b8eea','#d670d6','#29b8db','#e5e5e5'][n] || '#b0c0a0';
+  }
+  if (n >= 232) {
+    const g = 8 + (n - 232) * 10;
+    return 'rgb(' + g + ',' + g + ',' + g + ')';
+  }
+  n -= 16;
+  const v = [0, 95, 135, 175, 215, 255];
+  return 'rgb(' + v[(n / 36) | 0] + ',' + v[((n % 36) / 6) | 0] + ',' + v[n % 6] + ')';
+}
+
+/** Convert ANSI SGR sequences to HTML spans (for docker compose logs). */
+function ansiToHtml(text) {
+  if (!text) return '';
+  if (text.indexOf('\x1b') === -1) return escapeHtml(text);
+
+  const out = [];
+  let i = 0;
+  let fg = null;
+  let bold = false;
+  let buf = '';
+
+  function styleAttr() {
+    const parts = [];
+    if (fg) parts.push('color:' + fg);
+    if (bold) parts.push('font-weight:bold');
+    return parts.join(';');
+  }
+
+  function flush() {
+    if (!buf) return;
+    const st = styleAttr();
+    if (st) out.push('<span style="' + st + '">');
+    out.push(escapeHtml(buf));
+    if (st) out.push('</span>');
+    buf = '';
+  }
+
+  function applySgr(params) {
+    flush();
+    const codes = params === '' ? [0] : params.split(';').map(function(x) { return x === '' ? 0 : parseInt(x, 10); });
+    for (let j = 0; j < codes.length; j++) {
+      const c = codes[j];
+      if (c === 0) { fg = null; bold = false; }
+      else if (c === 1) bold = true;
+      else if (c === 22) bold = false;
+      else if (c === 39) fg = null;
+      else if (c >= 30 && c <= 37) fg = ANSI_FG[c];
+      else if (c >= 90 && c <= 97) fg = ANSI_FG[c];
+      else if (c === 38 && codes[j + 1] === 5 && j + 2 < codes.length) {
+        fg = xterm256(codes[j + 2]); j += 2;
+      } else if (c === 38 && codes[j + 1] === 2 && j + 4 < codes.length) {
+        fg = 'rgb(' + codes[j + 2] + ',' + codes[j + 3] + ',' + codes[j + 4] + ')'; j += 4;
+      }
+    }
+  }
+
+  while (i < text.length) {
+    const ch = text.charCodeAt(i);
+    if (ch === 27 && text[i + 1] === '[') {
+      let j = i + 2;
+      let params = '';
+      while (j < text.length && /[0-9;]/.test(text[j])) params += text[j++];
+      const cmd = text[j++];
+      if (cmd === 'm') applySgr(params);
+      i = j;
+    } else if (ch === 27 && text[i + 1] === ']') {
+      flush();
+      let j = i + 2;
+      while (j < text.length && text.charCodeAt(j) !== 7) {
+        if (text.charCodeAt(j) === 27 && text[j + 1] === '\\') { j += 2; break; }
+        j++;
+      }
+      if (j < text.length && text.charCodeAt(j) === 7) j++;
+      i = j;
+    } else if (text[i] === '\r') {
+      if (text[i + 1] === '\n') { flush(); out.push('\n'); i += 2; }
+      else i++;
+    } else {
+      buf += text[i++];
+    }
+  }
+  flush();
+  return out.join('');
+}
+
+// ── Output panel helpers ───────────────────────────────────────────────
+function toggleOutputPanel() {
+  _outputCollapsed = !_outputCollapsed;
+  document.getElementById('output-body').classList.toggle('collapsed', _outputCollapsed);
+  document.getElementById('output-chevron').classList.toggle('up', !_outputCollapsed);
+}
+function showOutput(raw) {
+  const panel = document.getElementById('output-panel');
+  const body = document.getElementById('output-body');
+  // Server already emulates the terminal; re-parse only if ANSI slipped through.
+  const text = (raw && raw.includes('\x1b')) ? renderTerminalOutput(raw) : (raw || '');
+  body.textContent = trimLogLines(text, LOG_MAX_LINES);
+  panel.classList.add('show');
+  _outputCollapsed = false;
+  document.getElementById('output-body').classList.remove('collapsed');
+  document.getElementById('output-chevron').classList.add('up');
+  body.scrollTop = body.scrollHeight;
+  lsSet(LS_LOG, raw);
+}
+function clearOutput() {
+  document.getElementById('output-panel').classList.remove('show');
+  document.getElementById('output-body').textContent = '';
+  lsSet(LS_LOG, '');
+  _lastProgressLogLen = 0;
+}
+
+document.addEventListener('click', function(e) {
+  if (_busy) return;
+  if (e.target.closest('#output-panel')) return;
+  if (!_outputCollapsed && document.getElementById('output-panel').classList.contains('show')) {
+    _outputCollapsed = true;
+    document.getElementById('output-body').classList.add('collapsed');
+    document.getElementById('output-chevron').classList.remove('up');
+  }
+});
+
+// ── localStorage helpers ───────────────────────────────────────────────
+function lsSet(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){} }
+function lsGet(k,d){ try{ const v=localStorage.getItem(k); return v!==null?JSON.parse(v):d; }catch(e){ return d; } }
+
+// ── Toast notifications ────────────────────────────────────────────────
+function showToast(msg, type='info') {
+  const c = document.getElementById('toast-container');
+  const t = document.createElement('div');
+  t.className = 'toast toast-' + type;
+  t.textContent = msg;
+  c.appendChild(t);
+  setTimeout(() => { if(t.parentNode) t.remove(); }, 3300);
+}
+
+// ── Tab switching with persistence ─────────────────────────────────────
+function switchTab(name) {
+  if (name === 'wifi' && !IS_OPENWRT) {
+    showToast('WiFi management is only available on OpenWrt', 'error');
+    return;
+  }
+  if (name === 'adapter' && !IS_APPLE_SILICON) {
+    showToast('Adapter is only available on Apple Silicon Mac', 'error');
+    return;
+  }
+  if (name !== 'adapter') stopAdapterPolling();
+  ['control','env','compose','wifi','adapter'].forEach((n,i) => {
+    document.querySelectorAll('.tab')[i].classList.toggle('active', n===name);
+    const panel = document.querySelectorAll('.panel')[i];
+    panel.classList.toggle('active', n===name);
+  });
+  lsSet(LS_TAB, name);
+  if (name==='env')     loadEnv();
+  if (name==='compose') loadCompose();
+  if (name==='wifi')    loadWifi();
+  if (name==='adapter') { loadAdapter(); startAdapterPolling(); }
+}
+
+async function api(path, body=null) {
+  const opts = body
+    ? {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}
+    : {};
+  const r = await fetch(path, opts);
+  if (r.status === 401) { window.location.href = '/'; return null; }
+  return r.json();
+}
+
+async function logout() {
+  await api('/api/logout', {});
+  window.location.href = '/';
+}
+
+function applyStatusData(data) {
+  currentSelected = data.selected;
+  selectedRunning  = data.instances[data.selected] ? data.instances[data.selected].running : false;
+
+  const hdrSel = document.getElementById('hdr-selected');
+  hdrSel.textContent = (data.selected || 'NONE').toUpperCase();
+  hdrSel.className   = 'badge badge-'+(data.selected || 'fkmtest');
+
+  const hdrSt = document.getElementById('hdr-status');
+  hdrSt.textContent = selectedRunning ? 'RUNNING' : 'STOPPED';
+  hdrSt.className   = 'badge '+(selectedRunning ? 'badge-ok' : 'badge-down');
+
+  document.getElementById('action-selected').textContent = currentSelected ? `— selected: ${currentSelected}` : '— no instances';
+
+  renderInstances(data.instances, currentSelected);
+}
+
+async function refreshAll() {
+  try {
+    const data = await api('/api/status');
+    if (!data) return;
+    lsSet(LS_STATUS, data);
+    applyStatusData(data);
+  } catch(e) {}
+}
+
+function renderInstances(instances, selected) {
+  const container = document.getElementById('instances-container');
+  let html = '';
+  let idx = 0;
+  const animCls = _firstRender ? ' animate-in' : '';
+  for (const [name, info] of Object.entries(instances || {})) {
+    const isSel = name === selected;
+    let btns = '';
+    if (isSel) {
+      btns += info.running
+        ? `<button class="btn-danger" data-action="stop-${name}" onclick="doAction('stop','${name}',this)">⏹ Stop</button>`
+        : `<button class="btn-success" data-action="start-${name}" onclick="doAction('start','${name}',this)">▶ Start</button>`;
+    } else {
+      btns += `<button class="btn-primary" data-action="activate-${name}" onclick="startSwitchTo('${name}',this)">⇄ Activate</button>`;
+    }
+    btns += `<button class="btn-neutral" data-action="pull-${name}" onclick="showPullModal('${name}')">⬇ Pull</button>`;
+    if (isSel) {
+      btns += `<button class="btn-warn" title="Clear Data (docker compose down --volumes)" onclick="openModal()">🧹 Clear</button>`;
+    }
+    btns += `<button class="btn-neutral" onclick="showBackupModal('${name}')" title="Backup & Download">📦</button>`;
+    if (info.running) btns += `<button class="btn-neutral" onclick="openLogsModal('${name}')" title="View Logs">📋</button>`;
+    btns += `<button class="btn-danger" onclick="showDeleteModal('${name}')">🗑</button>`;
+
+    html += `
+<div class="instance-row${isSel ? ' selected' : ''}${isSel && name === 'prod' ? ' prod' : ''}${animCls}" style="${_firstRender ? 'animation-delay:'+Math.min(idx*40,200)+'ms' : ''}">
+  <span class="inst-name" style="color:${name === 'prod' ? '#ff6060' : '#60aaff'}">${name}</span>
+  <span class="badge ${info.running ? 'badge-ok' : 'badge-down'}">${info.running ? 'UP' : 'DOWN'}${isSel ? ' ★' : ''}</span>
+  <div class="inst-actions">${btns}</div>
+</div>`;
+    idx++;
+  }
+  container.innerHTML = html;
+  _firstRender = false;
+}
+
+function setBtnLoading(btn, loading) {
+  if (!btn) return;
+  if (loading) {
+    btn.disabled = true;
+    btn._origHTML = btn.innerHTML;
+    btn.innerHTML = '<span class="spinner"></span>' + btn.innerText.replace(/[^\w\s]/g,'').trim();
+    _busyButtons.add(btn.dataset.action);
+  } else {
+    btn.disabled = false;
+    if (btn._origHTML) btn.innerHTML = btn._origHTML;
+    _busyButtons.delete(btn.dataset.action);
+  }
+}
+
+function startProgressPolling() {
+  _busy = true;
+  _lastProgressLogLen = 0;
+  if (_pollTimer) clearInterval(_pollTimer);
+  document.getElementById('progress-modal-overlay').classList.add('show');
+  document.getElementById('progress-stages').innerHTML = '';
+  document.getElementById('progress-fill').style.width = '0%';
+  _pollTimer = setInterval(pollProgress, 600);
+}
+
+async function doAction(action, target=null, triggerBtn=null) {
+  if (_busy) return;
+  setBtnLoading(triggerBtn, true);
+  if (action === 'start' && ON_PORT80) {
+    document.getElementById('redirect-banner').style.display = 'block';
+    setTimeout(() => {
+      window.location.href = 'http://' + location.hostname + ':8181/';
+    }, 2200);
+  }
+  const body = target ? {action, instance: target} : {action};
+  const data = await api('/api/action', body);
+  setBtnLoading(triggerBtn, false);
+  if (!data || !data.ok) {
+    showToast(data?.error || 'Action failed', 'error');
+    return;
+  }
+  startProgressPolling();
+}
+
+// Switch / Activate
+async function startSwitchTo(name, triggerBtn=null) {
+  if (_busy) return;
+  setBtnLoading(triggerBtn, true);
+  if (ON_PORT80) {
+    document.getElementById('redirect-banner').style.display = 'block';
+    setTimeout(() => {
+      window.location.href = 'http://' + location.hostname + ':8181/';
+    }, 2800);
+  }
+  await api('/api/switch_to', {target: name});
+  setBtnLoading(triggerBtn, false);
+  startProgressPolling();
+}
+
+function renderProgress(data) {
+  const container = document.getElementById('progress-stages');
+  container.innerHTML = '';
+  let doneCount = 0;
+  const icons = {pending:'○', running:'◉', done:'✓', error:'✕'};
+  data.stages.forEach(s => {
+    if (s.status==='done') doneCount++;
+    container.innerHTML += '<div class="stage-row">' +
+      '<div class="stage-icon '+s.status+'">'+icons[s.status]+'</div>' +
+      '<span class="stage-label '+s.status+'">'+s.label+'</span></div>';
+  });
+  const pct = data.stages.length ? Math.round(doneCount/data.stages.length*100) : 0;
+  document.getElementById('progress-fill').style.width = pct+'%';
+}
+
+let _lastProgressLogLen = 0;
+
+async function pollProgress() {
+  let data;
+  try { data = await api('/api/progress'); } catch(e) { return; }
+  if (!data) return;
+  renderProgress(data);
+  // Live-update output panel while action is running (skip if log unchanged)
+  if (data.log && data.log.length !== _lastProgressLogLen) {
+    _lastProgressLogLen = data.log.length;
+    showOutput(data.log);
+  }
+  if (data.done) {
+    _lastProgressLogLen = 0;
+    clearInterval(_pollTimer);
+    _pollTimer = null;
+    _busy = false;
+    setTimeout(() => {
+      document.getElementById('progress-modal-overlay').classList.remove('show');
+    }, 1200);
+    showToast(data.ok ? 'Action completed successfully' : 'Action failed', data.ok ? 'success' : 'error');
+    await refreshAll();
+  }
+}
+
+async function maybeRestoreProgress() {
+  const data = await api('/api/progress');
+  if (!data || data.done) return;
+  _busy = true;
+  document.getElementById('progress-modal-overlay').classList.add('show');
+  renderProgress(data);
+  _pollTimer = setInterval(pollProgress, 600);
+}
+
+// Env
+async function loadEnv() {
+  const data = await api('/api/env');
+  if (!data) return;
+  document.getElementById('env-template').value = data.template;
+  document.getElementById('env-content').value  = data.content;
+  document.getElementById('env-instance-label').textContent = data.selected || 'none';
+  document.getElementById('env-save-msg').textContent = '';
+}
+
+async function saveEnv() {
+  const content = document.getElementById('env-content').value;
+  const data    = await api('/api/env/save', {content});
+  if (!data) return;
+  const msg     = document.getElementById('env-save-msg');
+  msg.textContent = data.ok ? '✓ Saved' : ('✗ '+data.error);
+  msg.style.color = data.ok ? '#60ff90' : '#ff6060';
+  if (data.ok && data.restarting) {
+    showToast('Saved — restarting compose to apply changes…', 'info');
+    startProgressPolling();
+  } else {
+    showToast(data.ok ? 'Environment saved' : 'Failed to save .env', data.ok ? 'success' : 'error');
+  }
+}
+
+// Compose
+async function loadCompose() {
+  const data = await api('/api/compose');
+  if (!data) return;
+  document.getElementById('compose-content').value = data.content || '';
+  document.getElementById('compose-instance-label').textContent = data.selected || 'none';
+  document.getElementById('compose-save-msg').textContent = '';
+}
+
+function showComposeSaveModal() {
+  document.getElementById('compose-save-modal-overlay').classList.add('show');
+}
+function closeComposeSaveModal() {
+  document.getElementById('compose-save-modal-overlay').classList.remove('show');
+}
+
+async function confirmComposeSave() {
+  closeComposeSaveModal();
+  const content = document.getElementById('compose-content').value;
+  const data = await api('/api/compose/save', {content});
+  if (!data) return;
+  const msg = document.getElementById('compose-save-msg');
+  msg.textContent = data.ok ? '✓ Saved' : ('✗ ' + data.error);
+  msg.style.color = data.ok ? '#60ff90' : '#ff6060';
+  if (data.ok && data.restarting) {
+    showToast('Saved — restarting compose to apply changes…', 'info');
+    startProgressPolling();
+  } else {
+    showToast(data.ok ? 'Compose file saved' : 'Failed to save', data.ok ? 'success' : 'error');
+  }
+}
+
+// WiFi
+async function loadWifi() {
+  const msg = document.getElementById('wifi-msg');
+  msg.textContent = 'Loading...'; msg.style.color = '#888';
+  const data = await api('/api/wifi/current');
+  if (!data) return;
+  document.getElementById('hs-ssid').value  = data.hs_ssid  || '';
+  document.getElementById('hs-psk').value   = data.hs_psk   || '';
+  document.getElementById('sta-ssid').value = data.sta_ssid || '';
+  document.getElementById('sta-psk').value  = data.sta_psk  || '';
+  document.getElementById('ip-lan').textContent     = data.lan_ip      || '—';
+  document.getElementById('ip-wan').textContent     = data.wan_ip      || '—';
+  document.getElementById('ip-wan-wifi').textContent = data.wan_wifi_ip || '—';
+  if (data.ok) { msg.textContent = ''; }
+  else { msg.textContent = '⚠ uci unavailable'; msg.style.color='#ffaa00'; }
+}
+
+async function applyWifi() {
+  if (_busy) return;
+  const msg = document.getElementById('wifi-msg');
+  msg.textContent = '';
+  const body = {
+    hs_ssid: document.getElementById('hs-ssid').value,
+    hs_psk:  document.getElementById('hs-psk').value,
+    sta_ssid:document.getElementById('sta-ssid').value,
+    sta_psk: document.getElementById('sta-psk').value,
+  };
+  const data = await api('/api/wifi', body);
+  if (!data || !data.ok) {
+    showToast(data?.error || 'WiFi apply failed', 'error');
+    msg.textContent = '✗ ' + (data?.error || 'Error');
+    msg.style.color = '#ff6060';
+    return;
+  }
+  startProgressPolling();
+}
+
+// Modals
+function openModal() {
+  document.getElementById('modal-confirm-input').value = '';
+  document.getElementById('modal-ok-btn').disabled = true;
+  document.getElementById('modal-overlay').classList.add('show');
+  setTimeout(() => document.getElementById('modal-confirm-input').focus(), 50);
+}
+function closeModal() { document.getElementById('modal-overlay').classList.remove('show'); }
+function checkModalInput() {
+  document.getElementById('modal-ok-btn').disabled =
+    document.getElementById('modal-confirm-input').value !== 'DELETE';
+}
+async function confirmDownVolumes() { closeModal(); await doAction('down_volumes'); }
+
+let _pullTarget = null;
+function showPullModal(name) {
+  _pullTarget = name;
+  document.getElementById('pull-modal-overlay').classList.add('show');
+}
+function closePullModal() { document.getElementById('pull-modal-overlay').classList.remove('show'); }
+async function confirmPull(withUp) {
+  closePullModal();
+  await doAction(withUp ? 'pull_up' : 'pull', _pullTarget);
+}
+
+async function showCreateModal() {
+  document.getElementById('create-name').value = '';
+  document.getElementById('create-ok-btn').disabled = true;
+  const sel = document.getElementById('create-template');
+  sel.innerHTML = '<option disabled selected>Loading…</option>';
+  try {
+    const data = await api('/api/templates');
+    sel.innerHTML = '';
+    if (data && data.templates && data.templates.length) {
+      data.templates.forEach(t => {
+        const opt = document.createElement('option');
+        opt.value = t; opt.textContent = t;
+        sel.appendChild(opt);
+      });
+    } else {
+      sel.innerHTML = '<option disabled selected>No templates found</option>';
+    }
+  } catch(e) {
+    sel.innerHTML = '<option disabled selected>Failed to load templates</option>';
+  }
+  document.getElementById('create-modal-overlay').classList.add('show');
+}
+function closeCreateModal() { document.getElementById('create-modal-overlay').classList.remove('show'); }
+function checkCreateReady() {
+  document.getElementById('create-ok-btn').disabled = !document.getElementById('create-name').value.trim();
+}
+function confirmCreate() {
+  const name = document.getElementById('create-name').value.trim();
+  const templ = document.getElementById('create-template').value;
+  closeCreateModal();
+  createNewInstance(name, templ);
+}
+async function createNewInstance(name, template) {
+  const data = await api('/api/instance/create', {name, template});
+  if (!data) return;
+  if (data.ok) {
+    showToast(`Instance "${name}" created`, 'success');
+    await refreshAll();
+  } else {
+    showToast('Create failed: ' + (data.error || 'Unknown error'), 'error');
+  }
+}
+
+function showDeleteModal(name) {
+  document.getElementById('delete-instance-name').textContent = name;
+  document.getElementById('delete-confirm-input').value = '';
+  document.getElementById('delete-ok-btn').disabled = true;
+  document.getElementById('delete-modal-overlay').classList.add('show');
+}
+function closeDeleteModal() { document.getElementById('delete-modal-overlay').classList.remove('show'); }
+function checkDeleteInput() {
+  document.getElementById('delete-ok-btn').disabled =
+    document.getElementById('delete-confirm-input').value !== 'DELETE';
+}
+function confirmDeleteInstance() {
+  const name = document.getElementById('delete-instance-name').textContent;
+  closeDeleteModal();
+  deleteInstance(name);
+}
+async function deleteInstance(name) {
+  if (_busy) return;
+  const data = await api('/api/instance/delete', {name});
+  if (!data || !data.ok) {
+    showToast('Delete failed: ' + (data?.error || 'Unknown error'), 'error');
+    return;
+  }
+  startProgressPolling();
+}
+
+let _backupTarget = null;
+function showBackupModal(name) {
+  _backupTarget = name;
+  document.getElementById('backup-instance-name').textContent = name;
+  document.getElementById('backup-modal-overlay').classList.add('show');
+}
+function closeBackupModal() { document.getElementById('backup-modal-overlay').classList.remove('show'); }
+async function confirmBackup() {
+  closeBackupModal();
+  if (_busy || !_backupTarget) return;
+  const name = _backupTarget;
+  const data = await api('/api/instance/backup', {name});
+  if (!data || !data.ok) {
+    showToast('Backup failed: ' + (data?.error || 'Unknown error'), 'error');
+    return;
+  }
+  startProgressPolling();
+  // Poll for completion and trigger download
+  const dlPoll = setInterval(async () => {
+    let pg;
+    try { pg = await api('/api/progress'); } catch(e) { return; }
+    if (!pg || !pg.done) return;
+    clearInterval(dlPoll);
+    if (pg.ok) {
+      // Trigger download via hidden link
+      const a = document.createElement('a');
+      a.href = '/api/instance/backup/download?name=' + encodeURIComponent(name);
+      a.download = name + '.tar.gz';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      showToast('Backup download started', 'success');
+    }
+  }, 800);
+}
+
+// Logs modal — batch DOM updates to avoid freezing on bursty SSE
+let _logsEventSource = null;
+let _logsPending = '';
+let _logsDisplayed = '';
+let _logsFlushScheduled = false;
+
+function scheduleLogsFlush() {
+  if (_logsFlushScheduled) return;
+  _logsFlushScheduled = true;
+  requestAnimationFrame(flushLogsToDom);
+}
+
+function flushLogsToDom() {
+  _logsFlushScheduled = false;
+  if (!_logsPending) return;
+  const body = document.getElementById('logs-body');
+  const stickToBottom = body.scrollHeight - body.clientHeight - body.scrollTop <= 48;
+  _logsDisplayed += _logsPending;
+  _logsPending = '';
+  _logsDisplayed = trimLogLines(_logsDisplayed, LOG_MAX_LINES);
+  body.innerHTML = ansiToHtml(_logsDisplayed);
+  if (stickToBottom) body.scrollTop = body.scrollHeight;
+}
+
+function openLogsModal(name) {
+  document.getElementById('logs-instance-name').textContent = name;
+  const body = document.getElementById('logs-body');
+  body.innerHTML = '';
+  _logsPending = '';
+  _logsDisplayed = '';
+  document.getElementById('logs-modal-overlay').classList.add('show');
+  if (_logsEventSource) { _logsEventSource.close(); _logsEventSource = null; }
+  _logsEventSource = new EventSource('/api/logs?name=' + encodeURIComponent(name));
+  _logsEventSource.onmessage = function(e) {
+    _logsPending += e.data + '\n';
+    scheduleLogsFlush();
+  };
+  _logsEventSource.onerror = function() {
+    flushLogsToDom();
+    _logsEventSource.close();
+    _logsEventSource = null;
+  };
+}
+function closeLogsModal() {
+  document.getElementById('logs-modal-overlay').classList.remove('show');
+  flushLogsToDom();
+  _logsPending = '';
+  _logsDisplayed = '';
+  if (_logsEventSource) { _logsEventSource.close(); _logsEventSource = null; }
+}
+
+// ── Adapter tab JS ─────────────────────────────────────────────────────
+let _adapterPollTimer = null;
+
+async function loadAdapter() {
+  const data = await api('/api/adapter');
+  if (data) applyAdapterState(data);
+}
+
+function applyAdapterState(data) {
+  const badge   = document.getElementById('adapter-status-badge');
+  const btn     = document.getElementById('adapter-toggle-btn');
+  const dlRow   = document.getElementById('adapter-download-row');
+  const errRow  = document.getElementById('adapter-error-row');
+  const logWrap = document.getElementById('adapter-log-wrap');
+  const logEl   = document.getElementById('adapter-log');
+  const pidEl   = document.getElementById('adapter-pid');
+
+  if (data.downloading) {
+    badge.textContent = 'DOWNLOADING';
+    badge.className   = 'badge badge-fkmtest';
+  } else if (data.running) {
+    badge.textContent = 'RUNNING';
+    badge.className   = 'badge badge-ok';
+  } else if (data.enabled) {
+    badge.textContent = 'STARTING';
+    badge.className   = 'badge badge-fkmtest';
+  } else {
+    badge.textContent = 'DISABLED';
+    badge.className   = 'badge badge-down';
+  }
+
+  btn.textContent = data.enabled ? 'Disable' : 'Enable';
+  btn.className   = data.enabled ? 'btn-danger' : 'btn-success';
+
+  dlRow.style.display  = data.downloading ? 'block' : 'none';
+  errRow.style.display = data.error       ? 'block' : 'none';
+  if (data.error) errRow.textContent = '✗ ' + data.error;
+
+  pidEl.textContent = data.pid ? `PID: ${data.pid}` : '';
+
+  if (data.log) {
+    logWrap.style.display = 'block';
+    logEl.textContent = data.log;
+    logEl.scrollTop   = logEl.scrollHeight;
+  } else if (!data.enabled) {
+    logWrap.style.display = 'none';
+  }
+}
+
+async function toggleAdapter() {
+  const btn = document.getElementById('adapter-toggle-btn');
+  btn.disabled = true;
+  const cur = await api('/api/adapter');
+  if (!cur) { btn.disabled = false; return; }
+  const result = await api('/api/adapter/set', {enabled: !cur.enabled});
+  btn.disabled = false;
+  if (!result) return;
+  applyAdapterState(result);
+  if (result.enabled) startAdapterPolling();
+  else stopAdapterPolling();
+}
+
+function startAdapterPolling() {
+  if (_adapterPollTimer) return;
+  _adapterPollTimer = setInterval(async () => {
+    const data = await api('/api/adapter');
+    if (data) applyAdapterState(data);
+  }, 2000);
+}
+
+function stopAdapterPolling() {
+  if (_adapterPollTimer) { clearInterval(_adapterPollTimer); _adapterPollTimer = null; }
+}
+
+// ── Boot: restore saved state then fetch live data ─────────────────────
+(async () => {
+  // Disable WiFi tab when not running on OpenWrt
+  if (!IS_OPENWRT) {
+    document.getElementById('tab-wifi-btn').classList.add('tab-disabled');
+  }
+  // Disable Adapter tab when not on Apple Silicon
+  if (!IS_APPLE_SILICON) {
+    document.getElementById('tab-adapter-btn').classList.add('tab-disabled');
+  }
+
+  // Restore saved tab (skip wifi on non-OpenWrt, adapter on non-Apple-Silicon, default to control)
+  const savedTab = lsGet(LS_TAB, 'control');
+  const canRestore = savedTab !== 'control'
+    && (IS_OPENWRT        || savedTab !== 'wifi')
+    && (IS_APPLE_SILICON  || savedTab !== 'adapter');
+  if (canRestore) switchTab(savedTab);
+
+  // Restore cached status instantly (prevents blank screen on reload)
+  const cached = lsGet(LS_STATUS, null);
+  if (cached && cached.instances) {
+    applyStatusData(cached);
+  }
+
+  // Restore saved output panel
+  const savedLog = lsGet(LS_LOG, '');
+  if (savedLog) {
+    showOutput(savedLog);
+  }
+
+  await maybeRestoreProgress();
+  await refreshAll();
+  setInterval(refreshAll, 10000);
+})();
+</script>
+</body>
+</html>
