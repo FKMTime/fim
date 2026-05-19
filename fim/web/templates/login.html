@@ -2,48 +2,41 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>FKMTime Instance Manager — Login</title>
-<style>
-  *{box-sizing:border-box;margin:0;padding:0}
-  body{font-family:'Segoe UI',sans-serif;background:#0f1117;color:#e0e0e0;
-    min-height:100vh;display:flex;align-items:center;justify-content:center}
-  .box{background:#1a1d27;border:1px solid #2a2d3a;border-radius:12px;
-    padding:36px 32px;width:100%;max-width:360px}
-  h1{font-size:1.1rem;font-weight:600;margin-bottom:6px;color:#fff}
-  p{font-size:.82rem;color:#555;margin-bottom:24px}
-  label{font-size:.82rem;color:#777;display:block;margin-bottom:4px}
-  input{width:100%;background:#0f1117;color:#e0e0e0;border:1px solid #2a2d3a;
-    border-radius:6px;padding:9px 11px;font-size:.9rem;margin-bottom:14px}
-  input:focus{outline:none;border-color:#3a5caa}
-  button{width:100%;padding:10px;background:#2a5caa;color:#fff;border:none;
-    border-radius:6px;font-size:.9rem;font-weight:600;cursor:pointer}
-  button:hover{background:#3a6cba}
-  #err{color:#ff7070;font-size:.82rem;margin-top:10px;min-height:18px}
-</style>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>FKMTime — Login</title>
+<link rel="stylesheet" href="/static/login.css">
 </head>
 <body>
-<div class="box">
-  <h1>🐳 FKMTime Instance Manager</h1>
-  <p>Enter your credentials to continue</p>
-  <label>Username</label>
-  <input type="text" id="u" autofocus>
-  <label>Password</label>
-  <input type="password" id="p" onkeydown="if(event.key==='Enter')login()">
-  <button onclick="login()">Sign In</button>
-  <div id="err"></div>
+<div class="login-card">
+  <div class="login-brand">
+    <span class="login-mark" aria-hidden="true">FKM</span>
+    <h1>FKMTime Manager</h1>
+  </div>
+  <p class="login-sub">Sign in to manage instances</p>
+  <div class="field">
+    <label for="u">Username</label>
+    <input type="text" id="u" autocomplete="username" autofocus>
+  </div>
+  <div class="field">
+    <label for="p">Password</label>
+    <input type="password" id="p" autocomplete="current-password" onkeydown="if(event.key==='Enter')login()">
+  </div>
+  <button type="button" class="login-btn" onclick="login()">Sign in</button>
+  <div id="err" class="login-error" role="alert"></div>
 </div>
 <script>
 async function login() {
   const r = await fetch('/api/login', {
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({username: document.getElementById('u').value,
-                          password: document.getElementById('p').value})
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      username: document.getElementById('u').value,
+      password: document.getElementById('p').value,
+    }),
   });
   const d = await r.json();
-  if (d.ok) { window.location.href = '/'; }
-  else { document.getElementById('err').textContent = 'Invalid credentials'; }
+  if (d.ok) window.location.href = '/';
+  else document.getElementById('err').textContent = 'Invalid credentials';
 }
 </script>
 </body>

@@ -3,6 +3,7 @@ import os
 import subprocess
 import threading
 import urllib.request
+
 from fim.config import DATA_DIR, IS_APPLE_SILICON
 
 # ── Adapter manager (Apple Silicon only) ────────────────────────────────────

@@ -26,10 +26,11 @@ from fim.commands import run_cmd
 from fim.config import IS_APPLE_SILICON, IS_OPENWRT
 from fim.docker import compose_status
 from fim.files import read_compose, read_env, read_template, write_compose, write_env
-from fim.instances import get_instances, get_selected
+from fim.instances import get_instances, get_selected, get_templates
 from fim.instances_mgmt import create_instance
 from fim.progress import action_lock, get_progress
 from fim.web.pages import load_login_html, load_main_html
+from fim.web.static import resolve_static, static_mime
 from fim.workers import (
     backup_lock,
     backup_ready,
@@ -79,8 +80,25 @@ class Handler(BaseHTTPRequestHandler):
         return False
 
     # ── GET ──────────────────────────────────────────────────────────────────
+    def _send_static(self, rel_path: str):
+        file_path = resolve_static(rel_path)
+        if not file_path:
+            self.send_response(404)
+            self.end_headers()
+            return
+        data = file_path.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", static_mime(file_path))
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
+        self.wfile.write(data)
+
     def do_GET(self):
         path = urlparse(self.path).path
+        if path.startswith("/static/"):
+            self._send_static(path[len("/static/"):])
+            return
         if path in ("/", ""):
             if self.is_auth():
                 self.send_html(load_main_html(
@@ -95,9 +113,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/status":
             selected  = get_selected()
             instances = {}
-            for name, path in get_instances().items():
+            for name, inst_path in get_instances().items():
                 running, status_text = compose_status(name)
-                instances[name] = {"running": running, "status_text": status_text, "path": path}
+                instances[name] = {"running": running, "status_text": status_text, "path": inst_path}
             self.send_json({"selected": selected, "instances": instances})
         elif path == "/api/env":
             selected = get_selected()

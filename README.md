@@ -17,6 +17,10 @@ via [mdns-docker-adapter](https://github.com/filipton/docker-adapter/releases/la
 
 Once the manager is running, open the **Adapter** tab in the web UI to download and enable `docker-adapter` with one click.
 
+### Offline web UI
+
+The portal loads only local assets from `fim/web/static/` (`app.css`, `app.js`, `login.css`) — no CDN or external CSS/JS packages. Syntax highlighting is built into `app.js`.
+
 ## Running in Docker
 
 The manager needs the Docker socket so it can run `docker compose` commands on the host.
