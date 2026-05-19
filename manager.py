@@ -2,7 +2,12 @@
 
 """FKMTime Instance Manager - Port 8181 (+ dynamic port 80) - DYNAMIC INSTANCES"""
 
-import os, sys, platform, json, subprocess, threading, hashlib, secrets, time, shutil, tarfile
+import os, sys, platform, json, subprocess, threading, hashlib, secrets, time, shutil, tarfile, select, re
+try:
+    import pty
+    HAS_PTY = True
+except ImportError:
+    HAS_PTY = False
 import urllib.request
 
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
@@ -100,29 +105,179 @@ _progress = {
     "active": False,
     "stages": [],
     "log":    "",
+    "_term_buf": [],
+    "_term_cy": 0,
+    "_term_cx": 0,
     "done":   True,
     "ok":     True,
 }
+MAX_PROGRESS_LOG_LINES = 4000
 
 def progress_reset(stages):
     with _progress_lock:
-        _progress.update(active=True, done=False, ok=True, log="",
-                         stages=[{"label": s, "status": "pending"} for s in stages])
+        _progress.update(
+            active=True, done=False, ok=True, log="",
+            _term_buf=[], _term_cy=0, _term_cx=0,
+            stages=[{"label": s, "status": "pending"} for s in stages],
+        )
 
-def progress_stage(idx, status, log_line=""):
+def _term_ensure_row(buf, row):
+    while len(buf) <= row:
+        buf.append("")
+
+def _term_write(buf, cy, cx, ch):
+    _term_ensure_row(buf, cy)
+    line = buf[cy]
+    if cx >= len(line):
+        line = line + (" " * (cx - len(line))) + ch
+    else:
+        line = line[:cx] + ch + line[cx + 1:]
+    buf[cy] = line
+
+def _term_erase_line(buf, row):
+    _term_ensure_row(buf, row)
+    buf[row] = ""
+
+def _term_sync_log():
+    buf = _progress["_term_buf"]
+    if len(buf) > MAX_PROGRESS_LOG_LINES:
+        drop = len(buf) - MAX_PROGRESS_LOG_LINES
+        buf[:] = buf[drop:]
+        _progress["_term_cy"] = max(0, _progress["_term_cy"] - drop)
+    _progress["log"] = "\n".join(buf)
+
+def _term_parse_params(raw):
+    nums = []
+    for part in raw.split(";"):
+        part = part.lstrip("?")
+        if part.isdigit():
+            nums.append(int(part))
+    return nums
+
+def _term_feed(text):
+    """Minimal VT100 parser for docker compose progress redraws."""
+    if isinstance(text, bytes):
+        text = text.decode("utf-8", errors="replace")
+    buf = _progress["_term_buf"]
+    cy = _progress["_term_cy"]
+    cx = _progress["_term_cx"]
+    i = 0
+    while i < len(text):
+        c = text[i]
+        if c == "\x1b":
+            if i + 1 < len(text) and text[i + 1] == "[":
+                i += 2
+                raw = ""
+                while i < len(text) and text[i] in "0123456789;?":
+                    raw += text[i]
+                    i += 1
+                if i >= len(text):
+                    break
+                cmd = text[i]
+                i += 1
+                nums = _term_parse_params(raw)
+                n = nums[0] if nums else 1
+                if cmd == "A":  # cursor up
+                    cy = max(0, cy - (n if n else 1))
+                elif cmd == "B":  # cursor down
+                    cy += n if n else 1
+                    _term_ensure_row(buf, cy)
+                elif cmd in "G":  # cursor horizontal absolute
+                    cx = max(0, (n - 1) if n else 0)
+                elif cmd in "Hf":  # cursor position / home
+                    row = (nums[0] - 1) if len(nums) >= 1 and nums[0] else 0
+                    col = (nums[1] - 1) if len(nums) >= 2 and nums[1] else 0
+                    cy, cx = max(0, row), max(0, col)
+                    _term_ensure_row(buf, cy)
+                elif cmd == "K":  # erase in line
+                    _term_erase_line(buf, cy)
+                elif cmd == "J":  # erase in display
+                    if n == 2:
+                        buf.clear()
+                        cy, cx = 0, 0
+                    elif n == 1:
+                        del buf[cy + 1:]
+                    else:
+                        del buf[cy:]
+                        _term_ensure_row(buf, cy)
+                # else: ignore (e.g. ?25l/h cursor visibility)
+            elif i + 1 < len(text) and text[i + 1] == "]":
+                i += 2
+                while i < len(text) and text[i] != "\x07":
+                    if text[i] == "\x1b" and i + 1 < len(text) and text[i + 1] == "\\":
+                        i += 2
+                        break
+                    i += 1
+                if i < len(text) and text[i] == "\x07":
+                    i += 1
+            else:
+                i += 1
+        elif c == "\r":
+            if i + 1 < len(text) and text[i + 1] == "\n":
+                cy += 1
+                cx = 0
+                _term_ensure_row(buf, cy)
+                i += 2
+            else:
+                cx = 0
+                i += 1
+        elif c == "\n":
+            cy += 1
+            cx = 0
+            _term_ensure_row(buf, cy)
+            i += 1
+        elif c == "\b":
+            cx = max(0, cx - 1)
+            i += 1
+        elif c == "\x07":
+            i += 1
+        elif c.isprintable() or c in "\t":
+            _term_write(buf, cy, cx, c)
+            cx += 1
+            i += 1
+        else:
+            i += 1
+    _progress["_term_buf"] = buf
+    _progress["_term_cy"] = cy
+    _progress["_term_cx"] = cx
+    _term_sync_log()
+
+def progress_log_raw(chunk):
+    """Feed raw PTY output through the terminal emulator."""
+    if not chunk:
+        return
+    with _progress_lock:
+        _term_feed(chunk)
+
+def progress_log_line(line):
+    """Append a single logical log line."""
+    if not line:
+        return
+    with _progress_lock:
+        buf = _progress["_term_buf"]
+        buf.append(line.rstrip("\n"))
+        _progress["_term_cy"] = len(buf) - 1
+        _progress["_term_cx"] = len(buf[-1]) if buf else 0
+        _term_sync_log()
+
+def progress_stage(idx, status, log_line=None):
     with _progress_lock:
         if idx < len(_progress["stages"]):
             _progress["stages"][idx]["status"] = status
-        if log_line:
-            _progress["log"] += log_line + "\n"
+    if log_line:
+        progress_log_line(log_line)
 
 def progress_done(ok=True):
     with _progress_lock:
+        _term_sync_log()
         _progress.update(done=True, active=False, ok=ok)
 
 def get_progress():
     with _progress_lock:
-        return json.loads(json.dumps(_progress))
+        data = json.loads(json.dumps(_progress))
+        for k in ("_term_buf", "_term_cy", "_term_cx"):
+            data.pop(k, None)
+        return data
 
 # ── Selected helpers ────────────────────────────────────────────────────────
 
@@ -162,29 +317,112 @@ def run_cmd(args, cwd=None, timeout=180):
     except Exception as e:
         return -1, str(e) + "\n"
 
+def _pty_read_loop(master_fd, proc, deadline, on_chunk):
+    """Read PTY master until process exits; call on_chunk(bytes) for each read."""
+    output = bytearray()
+    while True:
+        if time.time() > deadline:
+            proc.kill()
+            on_chunk(b"\nCommand timed out\n")
+            return -1, bytes(output)
+
+        remaining = deadline - time.time()
+        wait = min(0.25, max(0.05, remaining))
+        try:
+            ready, _, _ = select.select([master_fd], [], [], wait)
+        except (ValueError, OSError):
+            ready = []
+
+        if ready:
+            try:
+                chunk = os.read(master_fd, 8192)
+            except OSError:
+                chunk = b""
+            if chunk:
+                output.extend(chunk)
+                on_chunk(chunk)
+
+        if proc.poll() is not None:
+            break
+
+    # Drain remaining output after process exit.
+    for _ in range(50):
+        try:
+            ready, _, _ = select.select([master_fd], [], [], 0.05)
+        except (ValueError, OSError):
+            break
+        if not ready:
+            break
+        try:
+            chunk = os.read(master_fd, 8192)
+        except OSError:
+            break
+        if not chunk:
+            break
+        output.extend(chunk)
+        on_chunk(chunk)
+
+    return proc.returncode, bytes(output)
+
 def run_cmd_live(args, cwd=None, timeout=180, stage_idx=0):
-    """Run a command and stream its output line-by-line into the progress log."""
+    """Run a command under a PTY when available and stream raw output into the progress log."""
+    def on_chunk(chunk):
+        progress_log_raw(chunk.decode("utf-8", errors="replace"))
+
+    deadline = time.time() + timeout
+    env = os.environ.copy()
+    env.setdefault("TERM", "xterm-256color")
+
+    if HAS_PTY:
+        master_fd, slave_fd = pty.openpty()
+        try:
+            proc = subprocess.Popen(
+                args, cwd=cwd, stdin=slave_fd, stdout=slave_fd, stderr=slave_fd,
+                close_fds=True, env=env,
+            )
+        except Exception as e:
+            os.close(master_fd)
+            os.close(slave_fd)
+            progress_log_line(str(e))
+            return -1, str(e) + "\n"
+        os.close(slave_fd)
+        try:
+            return _pty_read_loop(master_fd, proc, deadline, on_chunk)
+        except Exception as e:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+            progress_log_line(str(e))
+            return -1, str(e) + "\n"
+        finally:
+            try:
+                os.close(master_fd)
+            except OSError:
+                pass
+
+    # Fallback when PTY is unavailable (e.g. Windows).
     try:
         proc = subprocess.Popen(
             args, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            text=True, bufsize=1
+            text=True, bufsize=1, env=env,
         )
         output = ""
-        deadline = time.time() + timeout
         for line in proc.stdout:
             output += line
-            progress_stage(stage_idx, "running", line.rstrip("\n"))
+            progress_log_line(line.rstrip("\n"))
             if time.time() > deadline:
                 proc.kill()
-                output += "Command timed out\n"
-                progress_stage(stage_idx, "running", "Command timed out")
-                return -1, output
+                progress_log_line("Command timed out")
+                return -1, output + "Command timed out\n"
         proc.wait(timeout=max(0, deadline - time.time()))
         return proc.returncode, output
     except subprocess.TimeoutExpired:
         proc.kill()
+        progress_log_line("Command timed out")
         return -1, output + "Command timed out\n"
     except Exception as e:
+        progress_log_line(str(e))
         return -1, str(e) + "\n"
 
 def sanitize_wifi_value(value, field, max_len=64):
@@ -1014,7 +1252,7 @@ MAIN_HTML = r"""<!DOCTYPE html>
   .output-panel-header span{font-size:.8rem;font-weight:600;color:#888}
   .output-panel-header .chevron{transition:transform .2s;color:#666}
   .output-panel-header .chevron.up{transform:rotate(180deg)}
-  .output-panel-body{max-height:220px;overflow-y:auto;padding:0 16px 12px;font-family:'Courier New',monospace;font-size:.78rem;white-space:pre-wrap;color:#b0c0a0;transition:max-height .3s ease}
+  .output-panel-body{max-height:220px;overflow-y:auto;padding:0 16px 12px;font-family:'Courier New',monospace;font-size:.78rem;white-space:pre;color:#b0c0a0;transition:max-height .3s ease}
   .output-panel-body.collapsed{max-height:0;padding-bottom:0;overflow:hidden}
   .modal-overlay{display:none;position:fixed;inset:0;background:#000b;z-index:100;align-items:center;justify-content:center;opacity:0;transition:opacity .2s ease}
   .modal-overlay.show{display:flex;opacity:1}
@@ -1038,7 +1276,7 @@ MAIN_HTML = r"""<!DOCTYPE html>
   .logs-modal-overlay.show{display:flex;opacity:1}
   .logs-modal-header{display:flex;align-items:center;padding:14px 20px;background:#1a1d27;border-bottom:1px solid #2a2d3a;gap:12px}
   .logs-modal-header h3{font-size:1rem;font-weight:600;color:#fff;flex:1;margin:0}
-  .logs-modal-body{flex:1;overflow-y:auto;padding:12px 16px;font-family:'Courier New',monospace;font-size:.78rem;white-space:pre-wrap;color:#b0c0a0;background:#0a0c10;line-height:1.6}
+  .logs-modal-body{flex:1;overflow-y:auto;padding:12px 16px;font-family:'Courier New',monospace;font-size:.78rem;white-space:pre;color:#b0c0a0;background:#0a0c10;line-height:1.6}
 </style>
 </head>
 <body>
@@ -1285,6 +1523,45 @@ let _busyButtons     = new Set();
 let _firstRender     = true;
 
 let _outputCollapsed = false;
+const LOG_MAX_LINES = 4000;
+
+// Strip ANSI/OSC sequences and apply \\r / \\b so in-place progress renders as plain text.
+function renderTerminalOutput(raw) {
+  if (!raw) return '';
+  let s = raw.replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, '');
+  s = s.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '');
+  s = s.replace(/\x1b[@-_]/g, '');
+  const lines = [];
+  let cur = '';
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (c === '\r') {
+      if (s[i + 1] === '\n') {
+        lines.push(cur);
+        cur = '';
+        i++;
+      } else {
+        cur = '';
+      }
+    } else if (c === '\n') {
+      lines.push(cur);
+      cur = '';
+    } else if (c === '\b') {
+      cur = cur.slice(0, -1);
+    } else if (c !== '\x07') {
+      cur += c;
+    }
+  }
+  if (cur) lines.push(cur);
+  return lines.join('\n');
+}
+
+function trimLogLines(text, maxLines) {
+  if (!text) return '';
+  const lines = text.split('\n');
+  if (lines.length <= maxLines) return text;
+  return lines.slice(lines.length - maxLines).join('\n');
+}
 
 // ── Output panel helpers ───────────────────────────────────────────────
 function toggleOutputPanel() {
@@ -1292,21 +1569,24 @@ function toggleOutputPanel() {
   document.getElementById('output-body').classList.toggle('collapsed', _outputCollapsed);
   document.getElementById('output-chevron').classList.toggle('up', !_outputCollapsed);
 }
-function showOutput(text) {
+function showOutput(raw) {
   const panel = document.getElementById('output-panel');
   const body = document.getElementById('output-body');
-  body.textContent = text;
+  // Server already emulates the terminal; re-parse only if ANSI slipped through.
+  const text = (raw && raw.includes('\x1b')) ? renderTerminalOutput(raw) : (raw || '');
+  body.textContent = trimLogLines(text, LOG_MAX_LINES);
   panel.classList.add('show');
   _outputCollapsed = false;
   document.getElementById('output-body').classList.remove('collapsed');
   document.getElementById('output-chevron').classList.add('up');
   body.scrollTop = body.scrollHeight;
-  lsSet(LS_LOG, text);
+  lsSet(LS_LOG, raw);
 }
 function clearOutput() {
   document.getElementById('output-panel').classList.remove('show');
   document.getElementById('output-body').textContent = '';
   lsSet(LS_LOG, '');
+  _lastProgressLogLen = 0;
 }
 
 document.addEventListener('click', function(e) {
@@ -1447,6 +1727,7 @@ function setBtnLoading(btn, loading) {
 
 function startProgressPolling() {
   _busy = true;
+  _lastProgressLogLen = 0;
   if (_pollTimer) clearInterval(_pollTimer);
   document.getElementById('progress-modal-overlay').classList.add('show');
   document.getElementById('progress-stages').innerHTML = '';
@@ -1503,16 +1784,20 @@ function renderProgress(data) {
   document.getElementById('progress-fill').style.width = pct+'%';
 }
 
+let _lastProgressLogLen = 0;
+
 async function pollProgress() {
   let data;
   try { data = await api('/api/progress'); } catch(e) { return; }
   if (!data) return;
   renderProgress(data);
-  // Live-update output panel while action is running
-  if (data.log) {
+  // Live-update output panel while action is running (skip if log unchanged)
+  if (data.log && data.log.length !== _lastProgressLogLen) {
+    _lastProgressLogLen = data.log.length;
     showOutput(data.log);
   }
   if (data.done) {
+    _lastProgressLogLen = 0;
     clearInterval(_pollTimer);
     _pollTimer = null;
     _busy = false;
@@ -1757,26 +2042,53 @@ async function confirmBackup() {
   }, 800);
 }
 
-// Logs modal
+// Logs modal — batch DOM updates to avoid freezing on bursty SSE
 let _logsEventSource = null;
+let _logsPending = '';
+let _logsDisplayed = '';
+let _logsFlushScheduled = false;
+
+function scheduleLogsFlush() {
+  if (_logsFlushScheduled) return;
+  _logsFlushScheduled = true;
+  requestAnimationFrame(flushLogsToDom);
+}
+
+function flushLogsToDom() {
+  _logsFlushScheduled = false;
+  if (!_logsPending) return;
+  const body = document.getElementById('logs-body');
+  _logsDisplayed += _logsPending;
+  _logsPending = '';
+  _logsDisplayed = trimLogLines(_logsDisplayed, LOG_MAX_LINES);
+  body.textContent = _logsDisplayed;
+  body.scrollTop = body.scrollHeight;
+}
+
 function openLogsModal(name) {
   document.getElementById('logs-instance-name').textContent = name;
   const body = document.getElementById('logs-body');
   body.textContent = '';
+  _logsPending = '';
+  _logsDisplayed = '';
   document.getElementById('logs-modal-overlay').classList.add('show');
   if (_logsEventSource) { _logsEventSource.close(); _logsEventSource = null; }
   _logsEventSource = new EventSource('/api/logs?name=' + encodeURIComponent(name));
   _logsEventSource.onmessage = function(e) {
-    body.textContent += e.data + '\n';
-    body.scrollTop = body.scrollHeight;
+    _logsPending += e.data + '\n';
+    scheduleLogsFlush();
   };
   _logsEventSource.onerror = function() {
+    flushLogsToDom();
     _logsEventSource.close();
     _logsEventSource = null;
   };
 }
 function closeLogsModal() {
   document.getElementById('logs-modal-overlay').classList.remove('show');
+  flushLogsToDom();
+  _logsPending = '';
+  _logsDisplayed = '';
   if (_logsEventSource) { _logsEventSource.close(); _logsEventSource = null; }
 }
 
