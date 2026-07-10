@@ -537,8 +537,8 @@ function showOutput(raw) {
 
   const visible = isTerminalVisible();
   const stickToBottom = visible && (body.scrollHeight - body.clientHeight - body.scrollTop <= 48);
-  const prevLen = lsGet(LS_LOG, '')?.length || 0;
-  const hasNew = raw && raw.length !== prevLen;
+  const prevLog = lsGet(LS_LOG, '') || '';
+  const hasNew = raw !== prevLog;
 
   body.innerHTML = formatTerminalHtml(raw);
   drawer.classList.add('open');
@@ -562,7 +562,7 @@ function clearOutput() {
   lsSet(LS_LOG, '');
   lsSet(LS_TERMINAL_OPEN, false);
   setTerminalUnread(false);
-  _lastProgressLogLen = 0;
+  resetProgressLogTracking();
 }
 
 // ── localStorage helpers ───────────────────────────────────────────────
@@ -771,7 +771,7 @@ function setBtnLoading(btn, loading) {
 
 function startProgressPolling() {
   _busy = true;
-  _lastProgressLogLen = 0;
+  resetProgressLogTracking();
   lsSet(LS_LOG, '');
   const outBody = document.getElementById('output-body');
   if (outBody) outBody.innerHTML = '';
@@ -833,20 +833,41 @@ function renderProgress(data) {
   document.getElementById('progress-fill').style.width = pct+'%';
 }
 
-let _lastProgressLogLen = 0;
+let _lastProgressLogSeq = -1;
+let _lastProgressLog = '';
+
+function progressLogChanged(data) {
+  if (!data || data.log == null) return false;
+  if (typeof data.log_seq === 'number') {
+    return data.log_seq !== _lastProgressLogSeq;
+  }
+  return data.log !== _lastProgressLog;
+}
+
+function rememberProgressLog(data) {
+  if (!data || data.log == null) return;
+  if (typeof data.log_seq === 'number') {
+    _lastProgressLogSeq = data.log_seq;
+  }
+  _lastProgressLog = data.log;
+}
+
+function resetProgressLogTracking() {
+  _lastProgressLogSeq = -1;
+  _lastProgressLog = '';
+}
 
 async function pollProgress() {
   let data;
   try { data = await api('/api/progress'); } catch(e) { return; }
   if (!data) return;
   renderProgress(data);
-  // Live-update output panel while action is running (skip if log unchanged)
-  if (data.log && data.log.length !== _lastProgressLogLen) {
-    _lastProgressLogLen = data.log.length;
+  if (progressLogChanged(data)) {
+    rememberProgressLog(data);
     showOutput(data.log);
   }
   if (data.done) {
-    _lastProgressLogLen = 0;
+    resetProgressLogTracking();
     clearInterval(_pollTimer);
     _pollTimer = null;
     _busy = false;
@@ -863,11 +884,15 @@ async function maybeRestoreProgress() {
   const data = await api('/api/progress');
   if (!data || data.done) return;
   _busy = true;
+  resetProgressLogTracking();
   document.body.classList.add('action-running');
   openTerminalForAction();
   document.getElementById('progress-modal-overlay').classList.add('show');
   renderProgress(data);
-  if (data.log) showOutput(data.log);
+  if (data.log != null) {
+    rememberProgressLog(data);
+    showOutput(data.log);
+  }
   _pollTimer = setInterval(pollProgress, 600);
 }
 

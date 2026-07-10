@@ -11,6 +11,7 @@ _progress = {
     "stages": [],
     "log":    "",
     "_raw_log": "",
+    "log_seq": 0,
     "done":   True,
     "ok":     True,
 }
@@ -19,7 +20,7 @@ MAX_RAW_LOG_CHARS = 600_000
 def progress_reset(stages):
     with _progress_lock:
         _progress.update(
-            active=True, done=False, ok=True, log="", _raw_log="",
+            active=True, done=False, ok=True, log="", _raw_log="", log_seq=0,
             stages=[{"label": s, "status": "pending"} for s in stages],
         )
 
@@ -31,6 +32,7 @@ def _append_raw(text):
         raw = raw[-MAX_RAW_LOG_CHARS:]
     _progress["_raw_log"] = raw
     _progress["log"] = raw
+    _progress["log_seq"] = _progress.get("log_seq", 0) + 1
 
 def progress_log_raw(chunk):
     """Append raw PTY output; the UI replays it through a terminal emulator."""
