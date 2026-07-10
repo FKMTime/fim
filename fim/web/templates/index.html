@@ -33,6 +33,7 @@
         <span id="hdr-status" class="pill">…</span>
       </div>
       <div class="topbar-actions">
+        <button type="button" class="btn btn-sm btn-ghost btn-labeled" onclick="showAccountModal()" title="Account" aria-label="Account"><span class="btn-lbl">Account</span></button>
         <button type="button" class="btn btn-sm btn-ghost btn-labeled" onclick="refreshAll()" title="Refresh" aria-label="Refresh"><span class="btn-ico" aria-hidden="true">↻</span><span class="btn-lbl">Refresh</span></button>
         <button type="button" class="btn btn-sm btn-ghost btn-labeled" onclick="logout()" title="Sign out" aria-label="Sign out"><span class="btn-lbl">Sign out</span></button>
       </div>
@@ -247,6 +248,34 @@
       <button type="button" class="btn btn-destructive" id="delete-ok-btn" onclick="confirmDeleteInstance()" disabled>Delete</button>
       <button type="button" class="btn btn-ghost" onclick="closeDeleteModal()">Cancel</button>
     </div>
+  </div>
+</div>
+
+<div id="account-modal-overlay" class="modal-overlay">
+  <div class="modal">
+    <h3>Account</h3>
+    <p id="account-modal-desc">Change the manager login password.</p>
+    <div class="field">
+      <label for="account-username">Username</label>
+      <input type="text" id="account-username" readonly>
+    </div>
+    <div class="field">
+      <label for="account-current">Current password</label>
+      <input type="password" id="account-current" autocomplete="current-password">
+    </div>
+    <div class="field">
+      <label for="account-new">New password</label>
+      <input type="password" id="account-new" autocomplete="new-password">
+    </div>
+    <div class="field">
+      <label for="account-confirm">Confirm new password</label>
+      <input type="password" id="account-confirm" autocomplete="new-password" onkeydown="if(event.key==='Enter')confirmAccountPassword()">
+    </div>
+    <div class="modal-actions">
+      <button type="button" class="btn" onclick="confirmAccountPassword()">Change password</button>
+      <button type="button" class="btn btn-ghost" onclick="closeAccountModal()">Cancel</button>
+    </div>
+    <span id="account-msg" class="form-msg" role="status"></span>
   </div>
 </div>
 

@@ -16,10 +16,14 @@ from fim.adapter import (
 )
 from fim.auth import (
     SESSION_TTL,
+    change_password,
     check_credentials,
     create_session,
+    get_account_info,
     get_cookie,
+    get_username,
     sessions,
+    validate_new_password,
     validate_session,
 )
 from fim.commands import run_cmd
@@ -107,7 +111,7 @@ class Handler(BaseHTTPRequestHandler):
                     is_apple_silicon=IS_APPLE_SILICON,
                 ))
             else:
-                self.send_html(load_login_html())
+                self.send_html(load_login_html(is_openwrt=IS_OPENWRT))
             return
         if not self.require_auth():
             return
@@ -127,6 +131,8 @@ class Handler(BaseHTTPRequestHandler):
             selected = get_selected()
             self.send_json({"selected": selected,
                             "content":  read_compose(selected)})
+        elif path == "/api/account":
+            self.send_json(get_account_info())
         elif path == "/api/wifi/current":
             if not IS_OPENWRT:
                 self.send_json({"ok": False, "error": "WiFi management requires OpenWrt"})
@@ -223,7 +229,22 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         path = urlparse(self.path).path
         body = self.read_body()
-        if path == "/api/login":
+        if path == "/api/password":
+            current = body.get("current_password", "")
+            new = body.get("new_password", "")
+            confirm = body.get("confirm_password", "")
+            if new != confirm:
+                self.send_json({"ok": False, "error": "Passwords do not match"})
+                return
+            try:
+                validate_new_password(new)
+            except ValueError as e:
+                self.send_json({"ok": False, "error": str(e)})
+                return
+            ok, err = change_password(get_username(), current, new)
+            self.send_json({"ok": ok, "error": err})
+            return
+        elif path == "/api/login":
             u = body.get("username", "")
             p = body.get("password", "")
             if check_credentials(u, p):

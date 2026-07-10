@@ -987,6 +987,46 @@ async function applyWifi() {
 }
 
 // Modals
+async function showAccountModal() {
+  const data = await api('/api/account');
+  if (!data) return;
+  document.getElementById('account-username').value = data.username || 'root';
+  document.getElementById('account-current').value = '';
+  document.getElementById('account-new').value = '';
+  document.getElementById('account-confirm').value = '';
+  setFormMsg(document.getElementById('account-msg'), '');
+  const desc = document.getElementById('account-modal-desc');
+  if (desc) {
+    desc.textContent = data.uses_system_password
+      ? 'Changes the OpenWrt root password used for FKM, LuCI, and SSH.'
+      : 'Change the manager login password.';
+  }
+  document.getElementById('account-modal-overlay').classList.add('show');
+  document.getElementById('account-current').focus();
+}
+
+function closeAccountModal() {
+  document.getElementById('account-modal-overlay').classList.remove('show');
+}
+
+async function confirmAccountPassword() {
+  const msg = document.getElementById('account-msg');
+  setFormMsg(msg, '');
+  const body = {
+    current_password: document.getElementById('account-current').value,
+    new_password: document.getElementById('account-new').value,
+    confirm_password: document.getElementById('account-confirm').value,
+  };
+  const data = await api('/api/password', body);
+  if (!data) return;
+  if (data.ok) {
+    closeAccountModal();
+    showToast(IS_OPENWRT ? 'OpenWrt password updated' : 'Password updated', 'success');
+    return;
+  }
+  setFormMsg(msg, data.error || 'Password change failed', 'err');
+}
+
 function openModal() {
   document.getElementById('modal-confirm-input').value = '';
   document.getElementById('modal-ok-btn').disabled = true;

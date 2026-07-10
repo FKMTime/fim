@@ -8,8 +8,18 @@ def _read(name: str) -> str:
     return (_TEMPLATES / name).read_text(encoding="utf-8")
 
 
-def load_login_html() -> str:
-    return _read("login.html")
+def load_login_html(*, is_openwrt: bool = False) -> str:
+    html = _read("login.html")
+    if is_openwrt:
+        html = html.replace(
+            '<input type="text" id="u" autocomplete="username" autofocus>',
+            '<input type="text" id="u" autocomplete="username" value="root" readonly>',
+        )
+        html = html.replace(
+            "Sign in to manage instances",
+            "Sign in with your OpenWrt root password",
+        )
+    return html
 
 
 def load_main_html(*, is_openwrt: bool, is_apple_silicon: bool) -> str:
