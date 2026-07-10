@@ -2,9 +2,14 @@
 import json
 import os
 import shutil
-from fim.commands import run_cmd
-from fim.config import IS_ROOT
+from fim.commands import run_cmd, run_cmd_live
+from fim.config import DOCKER_COMPOSE_TIMEOUT, IS_ROOT
 from fim.instances import get_instances
+
+
+def run_compose_live(args, cwd=None, stage_idx=0):
+    """Run docker compose with no hard timeout by default."""
+    return run_cmd_live(args, cwd=cwd, timeout=DOCKER_COMPOSE_TIMEOUT, stage_idx=stage_idx)
 
 def sanitize_wifi_value(value, field, max_len=64):
     if value is None:

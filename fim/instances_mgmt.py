@@ -2,7 +2,7 @@
 import os
 import shutil
 from fim.commands import run_cmd
-from fim.config import INSTANCES_DIR, LOCK_FILE
+from fim.config import DOCKER_COMPOSE_TIMEOUT, INSTANCES_DIR, LOCK_FILE
 from fim.docker import force_rmtree
 from fim.instances import (
     get_instances,
@@ -76,7 +76,7 @@ def delete_instance(name):
         return False, "Instance not found"
     path = insts[name]
     output = f"=== Down + Delete Volumes + Remove {name} ===\n"
-    code, out = run_cmd(["docker", "compose", "down", "--volumes"], cwd=path, timeout=90)
+    code, out = run_cmd(["docker", "compose", "down", "--volumes"], cwd=path, timeout=DOCKER_COMPOSE_TIMEOUT)
     output += out
     if code != 0:
         output += "WARNING: docker compose down --volumes failed (continuing with folder removal)\n"

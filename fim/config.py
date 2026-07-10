@@ -11,6 +11,8 @@ LOCK_FILE = os.path.join(DATA_DIR, ".instance_selected")
 AUTH_FILE = os.path.join(DATA_DIR, "auth.json")
 PORT_MAIN = 8181
 PORT_ALT = 80
+# None = wait until docker compose exits (pull/up can take a long time on routers).
+DOCKER_COMPOSE_TIMEOUT = None
 IS_OPENWRT = os.path.isfile("/etc/openwrt_release")
 IS_ROOT = os.geteuid() == 0
 IS_MACOS = sys.platform == "darwin"

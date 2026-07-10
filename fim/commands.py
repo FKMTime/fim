@@ -12,7 +12,15 @@ from fim.progress import progress_log_line, progress_log_raw
 
 def run_cmd(args, cwd=None, timeout=180):
     try:
-        r = subprocess.run(args, cwd=cwd, capture_output=True, text=True, timeout=timeout)
+        kwargs = {
+            "args": args,
+            "cwd": cwd,
+            "capture_output": True,
+            "text": True,
+        }
+        if timeout is not None:
+            kwargs["timeout"] = timeout
+        r = subprocess.run(**kwargs)
         return r.returncode, r.stdout + r.stderr
     except subprocess.TimeoutExpired:
         return -1, "Command timed out\n"
@@ -23,13 +31,15 @@ def _pty_read_loop(master_fd, proc, deadline, on_chunk):
     """Read PTY master until process exits; call on_chunk(bytes) for each read."""
     output = bytearray()
     while True:
-        if time.time() > deadline:
+        if deadline is not None and time.time() > deadline:
             proc.kill()
             on_chunk(b"\nCommand timed out\n")
             return -1, bytes(output)
 
-        remaining = deadline - time.time()
-        wait = min(0.25, max(0.05, remaining))
+        wait = 0.25
+        if deadline is not None:
+            remaining = deadline - time.time()
+            wait = min(0.25, max(0.05, remaining))
         try:
             ready, _, _ = select.select([master_fd], [], [], wait)
         except (ValueError, OSError):
@@ -71,7 +81,7 @@ def run_cmd_live(args, cwd=None, timeout=180, stage_idx=0):
     def on_chunk(chunk):
         progress_log_raw(chunk.decode("utf-8", errors="replace"))
 
-    deadline = time.time() + timeout
+    deadline = None if timeout is None else time.time() + timeout
     env = os.environ.copy()
     env.setdefault("TERM", "xterm-256color")
 
@@ -113,11 +123,12 @@ def run_cmd_live(args, cwd=None, timeout=180, stage_idx=0):
         for line in proc.stdout:
             output += line
             progress_log_line(line.rstrip("\n"))
-            if time.time() > deadline:
+            if deadline is not None and time.time() > deadline:
                 proc.kill()
                 progress_log_line("Command timed out")
                 return -1, output + "Command timed out\n"
-        proc.wait(timeout=max(0, deadline - time.time()))
+        wait_timeout = None if deadline is None else max(0, deadline - time.time())
+        proc.wait(timeout=wait_timeout)
         return proc.returncode, output
     except subprocess.TimeoutExpired:
         proc.kill()
