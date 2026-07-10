@@ -10,6 +10,7 @@ from fim.auth import (
     validate_session,
 )
 from fim.openwrt_auth import (
+    choose_default_login_username,
     find_rpcd_login,
     list_rpcd_usernames,
     parse_rpcd_logins,
@@ -51,6 +52,15 @@ class RpcdParsingTests(unittest.TestCase):
         section, opts = find_rpcd_login(self.UCI, "admin")
         self.assertEqual(section, "@login[1]")
         self.assertEqual(opts["password"], "$1$salt$hash")
+
+    def test_choose_default_prefers_root(self):
+        self.assertEqual(choose_default_login_username(["admin", "root"]), "root")
+
+    def test_choose_default_first_user(self):
+        self.assertEqual(choose_default_login_username(["admin"]), "admin")
+
+    def test_choose_default_fallback(self):
+        self.assertEqual(choose_default_login_username([]), "root")
 
 
 class PasswordValidationTests(unittest.TestCase):

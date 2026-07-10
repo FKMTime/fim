@@ -61,6 +61,19 @@ def list_rpcd_usernames(uci_show_output):
     return users
 
 
+def choose_default_login_username(users):
+    if "root" in users:
+        return "root"
+    return users[0] if users else "root"
+
+
+def get_default_login_username():
+    code, out = run_cmd(["uci", "show", "rpcd"], timeout=5)
+    if code != 0:
+        return "root"
+    return choose_default_login_username(list_rpcd_usernames(out))
+
+
 def find_rpcd_login(uci_show_output, username):
     for section, opts in parse_rpcd_logins(uci_show_output).items():
         if opts.get("username") == username:
