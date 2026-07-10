@@ -506,6 +506,38 @@ textarea[readonly] { opacity: 0.7; }
 }
 .form-section .field { margin-bottom: 12px; }
 .form-section .field:last-child { margin-bottom: 0; }
+.password-field { position: relative; }
+.password-field input { padding-right: 38px; }
+.password-toggle {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+.password-toggle:hover {
+  color: var(--text-secondary);
+  background: var(--surface-hover);
+}
+.password-toggle:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-subtle);
+}
+.password-toggle-icon { display: block; }
+.password-toggle-icon--hide { display: none; }
+.password-toggle--visible .password-toggle-icon--show { display: none; }
+.password-toggle--visible .password-toggle-icon--hide { display: block; }
 
 @media (max-width: 640px) {
   .stat-grid { grid-template-columns: 1fr; }

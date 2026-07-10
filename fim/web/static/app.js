@@ -930,6 +930,26 @@ async function confirmComposeSave() {
 }
 
 // WiFi
+function togglePasswordVisibility(inputId, btn) {
+  const input = document.getElementById(inputId);
+  if (!input || !btn) return;
+  const show = input.type === 'password';
+  input.type = show ? 'text' : 'password';
+  btn.classList.toggle('password-toggle--visible', show);
+  btn.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+  btn.setAttribute('aria-pressed', show ? 'true' : 'false');
+}
+
+function resetPasswordVisibility(inputId) {
+  const input = document.getElementById(inputId);
+  const btn = input?.closest('.password-field')?.querySelector('.password-toggle');
+  if (!input || !btn) return;
+  input.type = 'password';
+  btn.classList.remove('password-toggle--visible');
+  btn.setAttribute('aria-label', 'Show password');
+  btn.setAttribute('aria-pressed', 'false');
+}
+
 async function loadWifi() {
   const msg = document.getElementById('wifi-msg');
   setFormMsg(msg, 'Loading…');
@@ -939,6 +959,7 @@ async function loadWifi() {
   document.getElementById('hs-psk').value   = data.hs_psk   || '';
   document.getElementById('sta-ssid').value = data.sta_ssid || '';
   document.getElementById('sta-psk').value  = data.sta_psk  || '';
+  ['hs-psk', 'sta-psk'].forEach(resetPasswordVisibility);
   document.getElementById('ip-lan').textContent     = data.lan_ip      || '—';
   document.getElementById('ip-wan').textContent     = data.wan_ip      || '—';
   document.getElementById('ip-wan-wifi').textContent = data.wan_wifi_ip || '—';
