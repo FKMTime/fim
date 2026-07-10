@@ -12,12 +12,8 @@ def load_login_html(*, is_openwrt: bool = False) -> str:
     html = _read("login.html")
     if is_openwrt:
         html = html.replace(
-            '<input type="text" id="u" autocomplete="username" autofocus>',
-            '<input type="text" id="u" autocomplete="username" value="root" readonly>',
-        )
-        html = html.replace(
             "Sign in to manage instances",
-            "Sign in with your OpenWrt root password",
+            "Sign in with your OpenWrt / LuCI username and password",
         )
     return html
 

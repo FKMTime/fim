@@ -7,7 +7,7 @@ Manages FKMTime instances running on **OpenWRT** routers (or any Linux host with
 python3 manager.py
 ```
 
-Serves on `http://0.0.0.0:8181`. On OpenWrt, sign in with the system `root` password (same as LuCI/SSH). Elsewhere the default is `root` / `root` in `auth.json`.
+Serves on `http://0.0.0.0:8181`. On OpenWrt, sign in with any LuCI username/password (same as the web UI, via rpcd). Elsewhere the default is `root` / `root` in `auth.json`.
 
 ### macOS
 

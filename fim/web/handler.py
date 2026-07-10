@@ -21,7 +21,7 @@ from fim.auth import (
     create_session,
     get_account_info,
     get_cookie,
-    get_username,
+    get_session_username,
     sessions,
     validate_new_password,
     validate_session,
@@ -132,7 +132,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"selected": selected,
                             "content":  read_compose(selected)})
         elif path == "/api/account":
-            self.send_json(get_account_info())
+            self.send_json(get_account_info(get_cookie(self.headers, "session")))
         elif path == "/api/wifi/current":
             if not IS_OPENWRT:
                 self.send_json({"ok": False, "error": "WiFi management requires OpenWrt"})
@@ -230,6 +230,8 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         body = self.read_body()
         if path == "/api/password":
+            if not self.require_auth():
+                return
             current = body.get("current_password", "")
             new = body.get("new_password", "")
             confirm = body.get("confirm_password", "")
@@ -241,14 +243,15 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError as e:
                 self.send_json({"ok": False, "error": str(e)})
                 return
-            ok, err = change_password(get_username(), current, new)
+            token = get_cookie(self.headers, "session")
+            ok, err = change_password(get_session_username(token), current, new)
             self.send_json({"ok": ok, "error": err})
             return
         elif path == "/api/login":
             u = body.get("username", "")
             p = body.get("password", "")
             if check_credentials(u, p):
-                token = create_session()
+                token = create_session(u)
                 body_bytes = json.dumps({"ok": True}).encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")

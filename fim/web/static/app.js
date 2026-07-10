@@ -998,7 +998,7 @@ async function showAccountModal() {
   const desc = document.getElementById('account-modal-desc');
   if (desc) {
     desc.textContent = data.uses_system_password
-      ? 'Changes the OpenWrt root password used for FKM, LuCI, and SSH.'
+    ? 'Changes the OpenWrt password for your signed-in user (LuCI / SSH / FKM).'
       : 'Change the manager login password.';
   }
   document.getElementById('account-modal-overlay').classList.add('show');
