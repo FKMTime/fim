@@ -3,6 +3,7 @@ import os
 import tarfile
 import threading
 from fim.commands import run_cmd, run_cmd_live
+from fim.openwrt_wifi import get_hotspot_radio_sections
 from fim.config import DATA_DIR, LOCK_FILE
 from fim.instances import get_instances, get_selected, refresh_instances, set_selected
 from fim.docker import compose_status, force_rmtree
@@ -170,12 +171,13 @@ def do_wifi_async(hs_ssid, hs_psk, sta_ssid, sta_psk):
     with action_lock:
         stages = []
         cmds_set = []
+        hotspot_radios = get_hotspot_radio_sections()
         if hs_ssid:
-            cmds_set += [["uci","set",f"wireless.default_radio1.ssid={hs_ssid}"],
-                         ["uci","set",f"wireless.default_radio2.ssid={hs_ssid}"]]
+            cmds_set += [["uci", "set", f"wireless.{radio}.ssid={hs_ssid}"]
+                         for radio in hotspot_radios]
         if hs_psk:
-            cmds_set += [["uci","set",f"wireless.default_radio1.key={hs_psk}"],
-                         ["uci","set",f"wireless.default_radio2.key={hs_psk}"]]
+            cmds_set += [["uci", "set", f"wireless.{radio}.key={hs_psk}"]
+                         for radio in hotspot_radios]
         if sta_ssid:
             cmds_set.append(["uci","set",f"wireless.default_radio0.ssid={sta_ssid}"])
         if sta_psk:
