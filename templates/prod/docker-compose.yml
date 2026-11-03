@@ -66,7 +66,7 @@ services:
         printf "users:\n  %s:\n    email: %s\n    password: %s\n" \
           "$$DOZZLE_USER" "$$DOZZLE_EMAIL" "$$DOZZLE_PASSWORD_HASH" > /data/users.yml
   dozzle:
-    image: amir20/dozzle:latest
+    image: amir20/dozzle:v11
     restart: unless-stopped
     depends_on:
       dozzle-init:
