@@ -6,6 +6,7 @@ from fim.commands import run_cmd, run_cmd_live
 from fim.config import DATA_DIR, LOCK_FILE
 from fim.docker import compose_status, force_rmtree, run_compose_live
 from fim.instances import get_instances, get_selected, refresh_instances, set_selected
+from fim.port80 import port80_released
 from fim.openwrt_wifi import get_hotspot_radio_sections
 from fim.instances_mgmt import (
     get_instance_template_path,
@@ -19,6 +20,11 @@ from fim.progress import (
     progress_stage,
 )
 
+def run_compose_up(cwd, stage_idx=0):
+    """`docker compose up -d` with fim's port-80 listener released, so nginx can bind it."""
+    with port80_released():
+        return run_compose_live(["docker", "compose", "up", "-d"], cwd=cwd, stage_idx=stage_idx)
+
 # ── Async switch worker ─────────────────────────────────────────────────────
 
 def do_switch_to(target):
@@ -31,7 +37,7 @@ def do_switch_to(target):
         if selected == target or selected is None:
             progress_reset([f"Start {target}"])
             progress_stage(0, "running")
-            code, out = run_compose_live(["docker", "compose", "up", "-d"], cwd=insts[target], stage_idx=0)
+            code, out = run_compose_up(cwd=insts[target], stage_idx=0)
             progress_stage(0, "done" if code == 0 else "error")
             if code == 0:
                 set_selected(target)
@@ -46,7 +52,7 @@ def do_switch_to(target):
             progress_done(ok=False)
             return
         progress_stage(1, "running")
-        code, out = run_compose_live(["docker", "compose", "up", "-d"], cwd=insts[target], stage_idx=1)
+        code, out = run_compose_up(cwd=insts[target], stage_idx=1)
         progress_stage(1, "done" if code == 0 else "error")
         if code != 0:
             progress_done(ok=False)
@@ -106,7 +112,10 @@ def do_action_async(action, target):
 
         progress_reset(stages)
         progress_stage(0, "running")
-        code, out = run_compose_live(cmd, cwd=cwd, stage_idx=0)
+        if action == "start":
+            code, out = run_compose_up(cwd=cwd, stage_idx=0)
+        else:
+            code, out = run_compose_live(cmd, cwd=cwd, stage_idx=0)
         progress_stage(0, "done" if code == 0 else "error")
         if code != 0:
             progress_done(ok=False)
@@ -130,7 +139,7 @@ def do_action_async(action, target):
 
         if (action == "down_volumes" and was_running) or action == "pull_up":
             progress_stage(si, "running")
-            code, out = run_compose_live(["docker", "compose", "up", "-d"], cwd=cwd, stage_idx=si)
+            code, out = run_compose_up(cwd=cwd, stage_idx=si)
             progress_stage(si, "done" if code == 0 else "error")
 
         progress_done(ok=code == 0)
@@ -230,7 +239,8 @@ def do_wifi_async(hs_ssid, hs_psk, sta_ssid, sta_psk):
         if len(stages) > 2 and selected:
             progress_stage(2, "running")
             progress_stage(2, "running", f"$ docker compose restart ({selected})")
-            code, out = run_compose_live(["docker","compose","restart"], cwd=get_instances()[selected], stage_idx=2)
+            with port80_released():
+                code, out = run_compose_live(["docker","compose","restart"], cwd=get_instances()[selected], stage_idx=2)
             progress_stage(2, "done" if code == 0 else "error")
 
         progress_done(ok=True)
@@ -247,7 +257,7 @@ def do_env_restart_async(name):
         progress_reset([f"Apply .env changes to {name}"])
         progress_stage(0, "running")
         progress_stage(0, "running", f"$ docker compose up -d ({name})")
-        code, out = run_compose_live(["docker", "compose", "up", "-d"], cwd=insts[name], stage_idx=0)
+        code, out = run_compose_up(cwd=insts[name], stage_idx=0)
         progress_stage(0, "done" if code == 0 else "error")
         progress_done(ok=code == 0)
 
@@ -271,7 +281,7 @@ def do_compose_restart_async(name):
             return
         progress_stage(1, "running")
         progress_stage(1, "running", f"$ docker compose up -d ({name})")
-        code, out = run_compose_live(["docker", "compose", "up", "-d"], cwd=cwd, stage_idx=1)
+        code, out = run_compose_up(cwd=cwd, stage_idx=1)
         progress_stage(1, "done" if code == 0 else "error")
         progress_done(ok=code == 0)
 
@@ -329,7 +339,7 @@ def do_backup_async(name):
         if running:
             progress_stage(si, "running")
             progress_stage(si, "running", f"$ docker compose up -d ({name})")
-            code, out = run_compose_live(["docker", "compose", "up", "-d"], cwd=cwd, stage_idx=si)
+            code, out = run_compose_up(cwd=cwd, stage_idx=si)
             progress_stage(si, "done" if code == 0 else "error")
 
         progress_done(ok=True)

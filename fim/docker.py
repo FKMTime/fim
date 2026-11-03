@@ -65,9 +65,31 @@ def compose_status(name):
             rows.append(line)
     return all_up, "\n".join(rows)
 
-def any_instance_running():
+# States in which a container holds (or is about to hold) its published ports.
+UP_STATES = {"running", "restarting", "starting"}
+
+def instance_has_up_container(name):
+    """True if any container of the instance is running, restarting or starting."""
+    insts = get_instances()
+    if name not in insts:
+        return False
+    code, out = run_cmd(["docker", "compose", "ps", "--format", "json"],
+                        cwd=insts[name], timeout=10)
+    if code != 0:
+        return False
+    for line in out.strip().splitlines():
+        try:
+            obj = json.loads(line)
+        except Exception:
+            continue
+        for row in obj if isinstance(obj, list) else [obj]:
+            if isinstance(row, dict) and row.get("State") in UP_STATES:
+                return True
+    return False
+
+def any_instance_up():
+    """True if any instance has a container up; used to decide who owns port 80."""
     for name in get_instances():
-        running, _ = compose_status(name)
-        if running:
+        if instance_has_up_container(name):
             return True
     return False
