@@ -17,6 +17,10 @@ via [mdns-docker-adapter](https://github.com/filipton/docker-adapter/releases/la
 
 Once the manager is running, open the **Adapter** tab in the web UI to download and enable `docker-adapter` with one click.
 
+### Wi-Fi stats on OpenWrt
+
+On OpenWrt, while an instance is running, the manager records the hotspot's per-station Wi-Fi stats (`iw station dump`, the in-use channel's survey, DHCP leases, load) once a minute. They are written every 10 minutes, and on stop, to `<instance>/logs/wifi-YYYY-MM-DD_HH.log.gz` (UTC hour); read them with `zcat`. Files older than 30 days are deleted, and the oldest ones while they total more than 200 MB.
+
 ### Offline web UI
 
 The portal loads only local assets from `fim/web/static/` (`app.css`, `app.js`, `login.css`) — no CDN or external CSS/JS packages. Syntax highlighting is built into `app.js`.

@@ -1,5 +1,6 @@
 """FKMTime Instance Manager entry point."""
 import os
+import signal
 import threading
 import time
 from http.server import ThreadingHTTPServer
@@ -19,7 +20,14 @@ from fim.config import (
 from fim import instances as instances_mod
 from fim.instances import get_instances, get_selected, get_templates, refresh_instances, set_selected
 from fim.port80 import port80_monitor, update_port80
+from fim.wifi_stats import start_wifi_stats, stop_wifi_stats
 from fim.web.handler import Handler
+
+
+def _interrupt_on_sigterm(signum, frame):
+    # procd stops services with SIGTERM; take the same path as Ctrl+C so
+    # buffered data is written before exit.
+    raise KeyboardInterrupt
 
 
 def main():
@@ -53,12 +61,15 @@ def main():
 
     threading.Thread(target=port80_monitor, daemon=True).start()
     update_port80()
+    start_wifi_stats()
+    signal.signal(signal.SIGTERM, _interrupt_on_sigterm)
 
     try:
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
         print("\nShutting down.")
+        stop_wifi_stats()
         main_server.shutdown()
 
 
