@@ -10,6 +10,7 @@ services:
       - DATABASE_URL=postgres://root:password@database:5432/fkm_time
       - SOCKET_PATH=/app/sock/socket.sock
       - DEVICE_LOGS_DIR=/device-logs
+      - BACKEND_LOGS_DIR=/backend-logs
     env_file:
       - .env
     volumes:
@@ -17,6 +18,9 @@ services:
       # The connector's device logs, read-only, for admins to watch from
       # the panel (FKMTime SPEC-009)
       - ./logs:/device-logs:ro
+      # The backend's own log, for admins to read from the panel
+      # (FKMTime SPEC-011)
+      - ./logs/backend:/backend-logs
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:5000/health || exit 1"]
       interval: 5s
@@ -57,36 +61,6 @@ services:
     depends_on:
       backend:
         condition: service_healthy
-  dozzle-init:
-    image: busybox
-    env_file: .env
-    volumes:
-      - ./dozzle:/data
-    command:
-      - sh
-      - -c
-      - |
-        mkdir -p /data
-        printf "users:\n  %s:\n    email: %s\n    password: %s\n" \
-          "$$DOZZLE_USER" "$$DOZZLE_EMAIL" "$$DOZZLE_PASSWORD_HASH" > /data/users.yml
-  dozzle:
-    image: amir20/dozzle:v11
-    restart: unless-stopped
-    depends_on:
-      dozzle-init:
-        condition: service_completed_successfully
-    dns:
-      - 8.8.8.8
-      - 8.8.4.4
-      - 1.1.1.1
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./dozzle:/data
-    ports:
-      - "8080:8080"
-    environment:
-      - DOZZLE_BASE=/logs
-      - DOZZLE_AUTH_PROVIDER=simple
   micro_connector:
     image: "ghcr.io/fkmtime/fkmtime-micro-connector:master"
     network_mode: host
