@@ -9,6 +9,7 @@ services:
     environment:
       - DATABASE_URL=postgres://root:password@database:5432/fkm_time
       - SOCKET_PATH=/app/sock/socket.sock
+      - DEVICE_LOGS_DIR=/device-logs
       - WCA_CLIENT_ID=example-application-id
       - WCA_CLIENT_SECRET=example-secret
       - WCA_LIVE_API_ORIGIN=http://nginx:80/dummy-wca-live/api
@@ -17,6 +18,9 @@ services:
       - .env
     volumes:
       - sock:/app/sock
+      # The connector's device logs, read-only, for admins to watch from
+      # the panel (FKMTime SPEC-009)
+      - ./logs:/device-logs:ro
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:5000/health || exit 1"]
       interval: 5s
