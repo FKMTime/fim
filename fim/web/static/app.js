@@ -984,7 +984,12 @@ async function loadWifi() {
   document.getElementById('hs-psk').value   = data.hs_psk   || '';
   document.getElementById('sta-ssid').value = data.sta_ssid || '';
   document.getElementById('sta-psk').value  = data.sta_psk  || '';
-  ['hs-psk', 'sta-psk'].forEach(resetPasswordVisibility);
+  document.getElementById('backup-ssid').value = data.backup_ssid || '';
+  document.getElementById('backup-psk').value  = data.backup_psk  || '';
+  const hasBackup = !!data.backup_ssid;
+  document.getElementById('uplink-primary-pill').hidden = !hasBackup || data.uplink_active !== 'primary';
+  document.getElementById('uplink-backup-pill').hidden  = !hasBackup || data.uplink_active !== 'backup';
+  ['hs-psk', 'sta-psk', 'backup-psk'].forEach(resetPasswordVisibility);
   document.getElementById('ip-lan').textContent     = data.lan_ip      || '—';
   document.getElementById('ip-wan').textContent     = data.wan_ip      || '—';
   document.getElementById('ip-wan-wifi').textContent = data.wan_wifi_ip || '—';
@@ -1001,6 +1006,8 @@ async function applyWifi() {
     hs_psk:  document.getElementById('hs-psk').value,
     sta_ssid:document.getElementById('sta-ssid').value,
     sta_psk: document.getElementById('sta-psk').value,
+    backup_ssid: document.getElementById('backup-ssid').value,
+    backup_psk:  document.getElementById('backup-psk').value,
   };
   const data = await api('/api/wifi', body);
   if (!data || !data.ok) {

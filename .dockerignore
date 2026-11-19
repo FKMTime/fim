@@ -1,5 +1,6 @@
 instances/
 auth.json
+wifi_uplink.json
 .instance_selected
 *.tar.gz
 compose.yml

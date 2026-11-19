@@ -214,6 +214,8 @@ body.tabs-open .section-menu-backdrop { display: block; }
 .pill-off::before { background: var(--text-muted); }
 .pill-on { color: var(--text); }
 .pill-instance { text-transform: uppercase; letter-spacing: 0.05em; }
+.pill[hidden] { display: none; }
+.form-section-title .pill { margin-left: 6px; vertical-align: middle; }
 
 /* ── Main content ── */
 .app-main {

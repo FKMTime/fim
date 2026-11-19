@@ -34,6 +34,7 @@ from fim.files import read_compose, read_env, read_template, write_compose, writ
 from fim.instances import get_instances, get_selected, get_templates
 from fim.instances_mgmt import create_instance
 from fim.progress import action_lock, get_progress
+from fim.uplink_failover import displayed_networks, get_uplink_settings
 from fim.web.pages import load_login_html, load_main_html
 from fim.web.static import resolve_static, static_mime
 from fim.workers import (
@@ -143,16 +144,24 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 hs_ssid  = uci_get("wireless.default_radio1.ssid")
                 hs_psk   = uci_get("wireless.default_radio1.key")
-                sta_ssid = uci_get("wireless.default_radio0.ssid")
-                sta_psk  = uci_get("wireless.default_radio0.key")
+                uplink_state, sta = get_uplink_settings()
+                primary, backup = displayed_networks(uplink_state, sta)
+                sta_ssid = primary["ssid"]
+                sta_psk  = primary["key"]
+                backup_ssid = backup["ssid"] if backup else ""
+                backup_psk  = backup["key"] if backup else ""
+                uplink_active = uplink_state["active"] if backup else "primary"
                 lan_ip      = get_ifstatus_ip("lan")
                 wan_ip      = get_ifstatus_ip("wan")
                 wan_wifi_ip = get_uplink_ip(get_sta_network_name())
                 ok = True
             except Exception:
-                hs_ssid = hs_psk = sta_ssid = sta_psk = lan_ip = wan_ip = wan_wifi_ip = ""; ok = False
+                hs_ssid = hs_psk = sta_ssid = sta_psk = lan_ip = wan_ip = wan_wifi_ip = ""
+                backup_ssid = backup_psk = ""; uplink_active = "primary"; ok = False
             self.send_json({"ok": ok, "hs_ssid": hs_ssid, "hs_psk": hs_psk,
                             "sta_ssid": sta_ssid, "sta_psk": sta_psk,
+                            "backup_ssid": backup_ssid, "backup_psk": backup_psk,
+                            "uplink_active": uplink_active,
                             "lan_ip": lan_ip, "wan_ip": wan_ip,
                             "wan_wifi_ip": wan_wifi_ip})
         elif path == "/api/progress":
@@ -380,10 +389,18 @@ class Handler(BaseHTTPRequestHandler):
                 hs_psk   = sanitize_wifi_value(body.get("hs_psk", ""), "hs_psk", max_len=63)
                 sta_ssid = sanitize_wifi_value(body.get("sta_ssid", ""), "sta_ssid", max_len=32)
                 sta_psk  = sanitize_wifi_value(body.get("sta_psk", ""), "sta_psk", max_len=63)
+                backup = None
+                if "backup_ssid" in body:
+                    backup = {
+                        "ssid": sanitize_wifi_value(body.get("backup_ssid", ""), "backup_ssid", max_len=32),
+                        "key":  sanitize_wifi_value(body.get("backup_psk", ""), "backup_psk", max_len=63),
+                    }
+                    if backup["key"] and len(backup["key"]) < 8:
+                        raise ValueError("backup_psk must be at least 8 characters")
             except ValueError as e:
                 self.send_json({"ok": False, "error": str(e)})
                 return
-            if not any([hs_ssid, hs_psk, sta_ssid, sta_psk]):
+            if not any([hs_ssid, hs_psk, sta_ssid, sta_psk]) and backup is None:
                 self.send_json({"ok": False, "error": "Nothing to set"})
                 return
             if not action_lock.acquire(blocking=False):
@@ -391,7 +408,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             action_lock.release()
             threading.Thread(target=do_wifi_async,
-                             args=(hs_ssid, hs_psk, sta_ssid, sta_psk),
+                             args=(hs_ssid, hs_psk, sta_ssid, sta_psk, backup),
                              daemon=True).start()
             self.send_json({"ok": True})
         else:

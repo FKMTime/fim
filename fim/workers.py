@@ -7,7 +7,8 @@ from fim.config import DATA_DIR, LOCK_FILE
 from fim.docker import compose_status, force_rmtree, run_compose_live
 from fim.instances import get_instances, get_selected, refresh_instances, set_selected
 from fim.port80 import port80_released
-from fim.openwrt_wifi import get_hotspot_radio_sections
+from fim.openwrt_wifi import get_hotspot_radio_sections, get_hotspot_values, hotspot_set_commands
+from fim.uplink_failover import note_sta_reloaded, sta_set_commands, update_uplink_settings
 from fim.instances_mgmt import (
     get_instance_template_path,
     purge_extra_dirs,
@@ -176,25 +177,29 @@ def do_delete_async(name):
             progress_stage(1, "error", str(e))
             progress_done(ok=False)
 
-def do_wifi_async(hs_ssid, hs_psk, sta_ssid, sta_psk):
+def do_wifi_async(hs_ssid, hs_psk, sta_ssid, sta_psk, backup=None):
+    """Apply the WiFi form. `backup` is the whole backup uplink ({"ssid", "key"},
+    empty ssid removes it) or None to leave it as it is."""
     with action_lock:
         stages = []
-        cmds_set = []
-        hotspot_radios = get_hotspot_radio_sections()
-        if hs_ssid:
-            cmds_set += [["uci", "set", f"wireless.{radio}.ssid={hs_ssid}"]
-                         for radio in hotspot_radios]
-        if hs_psk:
-            cmds_set += [["uci", "set", f"wireless.{radio}.key={hs_psk}"]
-                         for radio in hotspot_radios]
-        if sta_ssid:
-            cmds_set.append(["uci","set",f"wireless.default_radio0.ssid={sta_ssid}"])
-        if sta_psk:
-            cmds_set.append(["uci","set",f"wireless.default_radio0.key={sta_psk}"])
-        if not cmds_set:
-            progress_reset(["Apply WiFi"])
-            progress_stage(0, "error", "Nothing to set.")
+        cmds_set = hotspot_set_commands(
+            get_hotspot_values(get_hotspot_radio_sections()), hs_ssid, hs_psk)
+        try:
+            uplink_saved, sta_net = update_uplink_settings(
+                {"ssid": sta_ssid, "key": sta_psk}, backup)
+        except OSError as e:
+            progress_reset(["Save uplink networks"])
+            progress_stage(0, "error", f"Cannot save uplink networks: {e}")
             progress_done(ok=False)
+            return
+        if sta_net:
+            cmds_set += sta_set_commands(sta_net)
+        if not cmds_set:
+            # Nothing for uci: no Wi-Fi reload, no instance restart.
+            progress_reset(["Save uplink networks" if uplink_saved else "Apply WiFi"])
+            progress_stage(0, "done", "Saved; Wi-Fi and the instance were not touched."
+                           if uplink_saved else "No changes.")
+            progress_done(ok=True)
             return
 
         stages = ["Set WiFi parameters", "Commit & reload WiFi"]
@@ -233,6 +238,8 @@ def do_wifi_async(hs_ssid, hs_psk, sta_ssid, sta_psk):
             return
         progress_stage(1, "running", "$ wifi reload")
         code, out = run_cmd_live(["wifi","reload"], timeout=15, stage_idx=1)
+        if sta_net:
+            note_sta_reloaded()
         progress_stage(1, "done")
 
         # Stage 2 (optional): restart compose
