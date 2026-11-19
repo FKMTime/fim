@@ -26,6 +26,32 @@ def get_hotspot_radio_sections():
     return sections or ["default_radio1"]
 
 
+def hotspot_set_commands(current, ssid, psk):
+    """uci commands for hotspot values that differ from `current`.
+
+    current: {section: {"ssid": ..., "key": ...}} as uci has it now. Empty
+    ssid/psk mean "leave unchanged", as in the WiFi form. The form sends the
+    values it loaded, so skipping equal ones is what keeps an unrelated save
+    from reloading Wi-Fi and restarting the instance.
+    """
+    cmds = []
+    for section, values in current.items():
+        if ssid and values.get("ssid") != ssid:
+            cmds.append(["uci", "set", f"wireless.{section}.ssid={ssid}"])
+        if psk and values.get("key") != psk:
+            cmds.append(["uci", "set", f"wireless.{section}.key={psk}"])
+    return cmds
+
+
+def get_hotspot_values(sections):
+    def uci_get(key):
+        code, out = run_cmd(["uci", "-q", "get", key], timeout=5)
+        return out.strip() if code == 0 else ""
+    return {section: {"ssid": uci_get(f"wireless.{section}.ssid"),
+                      "key": uci_get(f"wireless.{section}.key")}
+            for section in sections}
+
+
 def parse_ifstatus_ip(ifstatus_output):
     try:
         info = json.loads(ifstatus_output)

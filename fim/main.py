@@ -20,6 +20,7 @@ from fim.config import (
 from fim import instances as instances_mod
 from fim.instances import get_instances, get_selected, get_templates, refresh_instances, set_selected
 from fim.port80 import port80_monitor, update_port80
+from fim.uplink_failover import start_uplink_failover, stop_uplink_failover
 from fim.wifi_stats import start_wifi_stats, stop_wifi_stats
 from fim.web.handler import Handler
 
@@ -62,6 +63,7 @@ def main():
     threading.Thread(target=port80_monitor, daemon=True).start()
     update_port80()
     start_wifi_stats()
+    start_uplink_failover()
     signal.signal(signal.SIGTERM, _interrupt_on_sigterm)
 
     try:
@@ -70,6 +72,7 @@ def main():
     except KeyboardInterrupt:
         print("\nShutting down.")
         stop_wifi_stats()
+        stop_uplink_failover()
         main_server.shutdown()
 
 

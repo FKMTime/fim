@@ -1,5 +1,6 @@
 __pycache__/
 auth.json
+wifi_uplink.json
 instances/
 .instance_selected
 .adapter_enabled

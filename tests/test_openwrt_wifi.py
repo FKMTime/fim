@@ -1,6 +1,7 @@
 import unittest
 
 from fim.openwrt_wifi import (
+    hotspot_set_commands,
     parse_hotspot_radio_sections,
     parse_ifstatus_ip,
     uplink_network_candidates,
@@ -50,3 +51,28 @@ class UplinkNetworkTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HotspotSetCommandsTests(unittest.TestCase):
+    CURRENT = {
+        "default_radio1": {"ssid": "CompNet", "key": "comp-pass-1"},
+        "default_radio2": {"ssid": "CompNet", "key": "comp-pass-1"},
+    }
+
+    def test_unchanged_values_produce_nothing(self):
+        self.assertEqual(hotspot_set_commands(self.CURRENT, "CompNet", "comp-pass-1"), [])
+
+    def test_empty_values_mean_unchanged(self):
+        self.assertEqual(hotspot_set_commands(self.CURRENT, "", ""), [])
+
+    def test_only_changed_fields(self):
+        self.assertEqual(hotspot_set_commands(self.CURRENT, "CompNet", "new-pass-12"), [
+            ["uci", "set", "wireless.default_radio1.key=new-pass-12"],
+            ["uci", "set", "wireless.default_radio2.key=new-pass-12"],
+        ])
+
+    def test_only_radios_that_differ(self):
+        current = dict(self.CURRENT, default_radio2={"ssid": "Other", "key": "comp-pass-1"})
+        self.assertEqual(hotspot_set_commands(current, "CompNet", "comp-pass-1"), [
+            ["uci", "set", "wireless.default_radio2.ssid=CompNet"],
+        ])
