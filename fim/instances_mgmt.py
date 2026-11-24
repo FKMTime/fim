@@ -1,6 +1,8 @@
 """Create, delete, and maintain instances."""
 import os
+import secrets
 import shutil
+import string
 from fim.commands import run_cmd
 from fim.config import DOCKER_COMPOSE_TIMEOUT, INSTANCES_DIR, LOCK_FILE
 from fim.docker import force_rmtree
@@ -11,6 +13,49 @@ from fim.instances import (
     refresh_instances,
     set_selected,
 )
+
+# The FKMTime backend refuses to start when SECRET is shorter than this.
+SECRET_MIN_LENGTH = 32
+GENERATED_SECRET_LENGTH = 48
+_SECRET_ALPHABET = string.ascii_letters + string.digits
+
+
+def _is_placeholder_secret(value):
+    """A SECRET the backend would reject: missing, empty, or too short.
+
+    This covers the old `example-secret` placeholder (14 chars) shipped by
+    earlier templates as well as the current empty `SECRET=`. Anything of a
+    usable length is treated as a real secret and left alone.
+    """
+    return value is None or len(value.strip().strip("'\"")) < SECRET_MIN_LENGTH
+
+
+def ensure_secret(env_file):
+    """Give a freshly created .env a random SECRET if it only has a placeholder.
+
+    Only call this on a .env that was just copied from its template; it must
+    never run against an existing instance's hand-edited .env.
+    """
+    with open(env_file) as f:
+        lines = f.read().splitlines(keepends=True)
+    index, value = None, None
+    for i, line in enumerate(lines):
+        key, sep, rest = line.partition("=")
+        if sep and key.strip() == "SECRET":
+            index, value = i, rest.rstrip("\r\n")
+    if not _is_placeholder_secret(value):
+        return
+    secret = "".join(secrets.choice(_SECRET_ALPHABET) for _ in range(GENERATED_SECRET_LENGTH))
+    new_line = f"SECRET={secret}\n"
+    if index is None:
+        if lines and not lines[-1].endswith("\n"):
+            lines[-1] += "\n"
+        lines.append(new_line)
+    else:
+        lines[index] = new_line
+    with open(env_file, "w") as f:
+        f.writelines(lines)
+
 
 def create_instance(name, template_key):
     name = name.strip()
@@ -32,6 +77,7 @@ def create_instance(name, template_key):
         env_file = os.path.join(dst, ".env")
         if os.path.isfile(env_template) and not os.path.isfile(env_file):
             shutil.copy2(env_template, env_file)
+            ensure_secret(env_file)
         refresh_instances()
         if get_selected() is None:
             set_selected(name)
