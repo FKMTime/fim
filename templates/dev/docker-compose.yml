@@ -80,6 +80,11 @@ services:
       - WCA_ORIGIN=/dummy-wca
     env_file:
       - .env
+    volumes:
+      # The image includes /etc/nginx/demo/*.conf but ships no routes there
+      # (FKMTime #745); without these, /dummy-wca/ falls through to the
+      # panel's 404 and nobody can sign in
+      - ./nginx/demo:/etc/nginx/demo:ro
     ports:
       - "80:80"
     depends_on:
